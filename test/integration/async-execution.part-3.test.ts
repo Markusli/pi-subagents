@@ -2192,18 +2192,18 @@ syncBuiltinESMExports();
 			},
 			shareEnabled: false,
 			sessionRoot: path.join(tempDir, "sessions"),
-			skills: ["pi-subagents"],
+			skills: ["missing-domain-skill"],
 			maxSubagentDepth: 2,
 		});
 
 		assert.equal(result.isError, true);
-		assert.match(result.content[0]?.text ?? "", /Skills not found: pi-subagents/);
+		assert.match(result.content[0]?.text ?? "", /Skills not found: missing-domain-skill/);
 	});
 
-	it("background chains report unavailable pi-subagents skill requests", () => {
+	it("background chains report any unavailable skill request", () => {
 		const id = `async-chain-pi-subagents-skill-${Date.now().toString(36)}`;
 		const result = executeAsyncChain(id, {
-			chain: [{ agent: "worker", task: "Do work", skill: ["pi-subagents"] }],
+			chain: [{ agent: "worker", task: "Do work", skill: ["missing-chain-skill"] }],
 			agents: [makeAgent("worker")],
 			ctx: { pi: { events: { emit() {} } }, cwd: tempDir, currentSessionId: "session-1" },
 			cwd: tempDir,
@@ -2221,7 +2221,7 @@ syncBuiltinESMExports();
 		});
 
 		assert.equal(result.isError, true);
-		assert.match(result.content[0]?.text ?? "", /Skills not found: pi-subagents/);
+		assert.match(result.content[0]?.text ?? "", /Skills not found: missing-chain-skill/);
 	});
 
 	it("background chains resolve relative step cwd values against the shared cwd", { skip: !isAsyncAvailable() ? "jiti not available" : undefined }, async () => {

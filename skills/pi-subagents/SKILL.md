@@ -24,6 +24,33 @@ and may perform the work directly where it is the most efficient owner.
 Children do not spawn subagents unless the parent explicitly delegated fanout
 and their resolved `tools` allow `subagent`.
 
+## Choose topology before role
+
+After delegation is authorized, first decide whether another independent context
+actually improves the work. Treat **solo parent** as a successful topology
+choice, not as a failure to orchestrate.
+
+- Stay **solo** for tightly coupled work where one coherent context must own the
+  decisions, or when the parent can inspect the bounded evidence more cheaply
+  than commissioning a child.
+- Use a **read-only evidence child** only for a concrete unknown that can be
+  answered independently. Parallelize distinct evidence questions, not several
+  copies of the same search.
+- Use a **fresh reviewer** after the artifact or decision is stable enough to
+  inspect independently. Give it the requirements plus the frozen/current
+  artifact and source evidence; do not preload the author's conclusions unless
+  those conclusions are themselves review evidence.
+- Use a **writer/executor child** only when mutation has one clear owner,
+  isolation is real, and there is an objective acceptance seam. Multiple writers
+  require independent mutation ownership, not merely a large task or several
+  testable subproblems.
+
+Roles such as `scout`, `researcher`, `reviewer`, `worker`, and
+`experiment-executor` are specializations inside these shapes; do not turn
+topology into another persisted state machine or role taxonomy. Parallelize
+independent information acquisition or isolated execution, not shared
+decision-making.
+
 ## Launch shape
 
 | Need | Use |
@@ -109,7 +136,11 @@ For an authorized complex delegated workflow, read `prompting-and-roles.md` and
 - Exact model names are deployment policy. Put them in user/project settings or profiles, not package guidance.
 - Give every child a compact meta-prompt checklist: objective; repo/cwd/ref; authority/edit boundary; relevant files/contracts and constraints; success/acceptance criteria; validation; expected output/report; and stop/ask conditions. See `references/prompting-and-roles.md`.
 - For substantial multi-step work, compile repeated workflow facts into existing launch contracts instead of prose repetition: bind required `skill`s explicitly, express completion with non-shell `acceptance` criteria/evidence/stop rules, attach related runs to one `mission`/`missionId` when durable recovery matters, and use managed `output` artifacts for large handoffs. Do not invent a second task-state model around these primitives.
-- Before launching a writer for substantial mutation work, classify it as single-seam or multi-seam and partition multi-seam work across exclusive component owners, gates, and durable handoffs before an integration-only owner. See `references/multi-lane-orchestration.md`.
+- Before launching a writer for substantial mutation work, classify it as
+  single-seam or multi-seam. Independently testable pieces are only candidate
+  seams: parallel writers require disjoint mutation/decision ownership or a
+  frozen interface between them. Otherwise keep one writer and sequence the
+  coupled work. See `references/multi-lane-orchestration.md`.
 - For mutation work, use an isolated lane/worktree when isolation, overlap, or concurrent juggling matters; keep one writer per cwd/worktree. See `references/multi-lane-orchestration.md` for lane mechanics.
 - Keep long/high-output validation out of chat: prefer `interactive_shell` dispatch/background monitors, bounded logs, or subagent-owned reports; return a concise summary plus report path unless same-turn output is required. Do not use `interactive_shell` as an implicit fallback for a failed `subagent` lane; see `references/execution-controls.md`.
 - Treat subagent workflow, child launch, prompt runtime, extension load, and child tooling setup failures as lane infrastructure blockers. Stop, report the exact failure and run/worktree state, verify a clean worktree or capture a partial diff, and use only a clear same-protocol retry or an owner-approved execution-mode fallback.

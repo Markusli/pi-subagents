@@ -6,9 +6,27 @@ Create lanes only after delegation is operator-authorized and each lane material
 
 ## Mandatory implementation-topology preflight
 
-Before launching a writer for substantial mutation work, classify the implementation as **single-seam** or **multi-seam**. Two or more independently testable contracts or source boundaries make it multi-seam. One PR does not imply one writer, and the one-writer-per-worktree rule prevents concurrent ownership conflicts; it does not authorize an issue-wide commission.
+Before launching a writer for substantial mutation work, classify the
+implementation as **single-seam** or **multi-seam**. One PR does not imply one
+writer, and the one-writer-per-worktree rule prevents concurrent ownership
+conflicts; it does not authorize an issue-wide commission.
 
-Record the classification and evidence on a lane board before writer launch. For multi-seam work, give each isolated component writer exclusive file or contract ownership and focused validation gates. Require every component to produce a committed or otherwise durable handoff, then start a separate integration-only owner after the component handoffs are ready. Mechanically reject and repartition a writer prompt if it owns all major outcomes across multiple independent boundaries.
+Independently testable contracts or source boundaries are **candidate** seams,
+not sufficient evidence for parallel writers. Call work multi-seam for mutation
+only when each component can make its changes without also deciding or revising
+the other component's interface, shared state, ordering, or invariant. If those
+decisions are coupled, keep one writer and sequence the work even when tests can
+be split. Read-only scouts and reviewers may still investigate the candidate
+seams independently.
+
+Record the classification and evidence on a lane board before writer launch. For
+genuinely independent multi-seam work, give each isolated component writer
+exclusive file or contract ownership and focused validation gates. A shared
+interface must already be frozen or owned by one integration seam before those
+writers run independently. Require every component to produce a committed or
+otherwise durable handoff, then start a separate integration-only owner after
+the component handoffs are ready. Mechanically reject and repartition a writer
+prompt if it owns all major outcomes across multiple independent boundaries.
 
 A single complete writer remains valid only when the board records evidence that the work is genuinely one seam or that splitting it would create overlapping ownership or artificial handoffs. This preflight must not manufacture parallelism: do not split tightly coupled work merely to increase the lane count.
 
@@ -28,7 +46,12 @@ Use one writer per repo/cwd or worktree. Mutation lanes need distinct isolation 
 
 For Pi extension repositories, keep lane worktrees outside auto-discovered extension directories such as `~/.pi/agent/extensions`. A stale extension worktree there can auto-load duplicate tools and shortcuts. Remove or move it only after its handoff is durable, the worktree is clean, and no run owns it.
 
-Partition fanout by repository, source seam, decision, or review angle. Each run needs a stable key, lane-specific task, and a managed output path when a file is needed. Do not launch prompts that differ only by item name or broad file glob.
+Partition fanout by repository, independently owned source seam, decision, or
+review angle. Each run needs a stable key, lane-specific task, and a managed
+output path when a file is needed. Do not launch prompts that differ only by
+item name or broad file glob. If two proposed mutation lanes must negotiate the
+same design decision while running, they are one coupled lane, not parallel
+writers.
 
 ### Cold-start packets and bounded orchestration audits
 

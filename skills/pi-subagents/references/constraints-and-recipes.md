@@ -58,9 +58,16 @@ This reference keeps cross-cutting policy and failure handling. Load the matchin
 After delegation is operator-authorized, choose the smallest recipe that earns
 its overhead. Recipes select a shape; they do not authorize delegation:
 
-- **Recon → plan → implement:** run one focused `scout`, then one `worker` that consumes its findings.
+- **Recon → plan → implement:** use one focused `scout` only when there is a
+  concrete codebase unknown that a separate read-only context can resolve more
+  efficiently than the parent. Feed that finding to one `worker`; do not add a
+  reconnaissance stage merely because implementation is large.
 - **Implementation:** clarify scope and acceptance, record user-owned decisions and seam/validation contracts, and use a bounded scout, writer, or fresh reviewer only where the requested delegation benefits from that stage. Keep one writer, inspect direct evidence, and require every added stage to earn its overhead. Split large work into serial milestones instead of a writer swarm; do not stop at review without disposition.
-- **Parallel analysis:** fan out only independent read/review/validation work, or isolate each writer in its own worktree. Never run concurrent writers in one checkout.
+- **Parallel analysis:** fan out only independent read/review/validation work.
+  Isolated worktrees prevent filesystem collisions but do not make coupled design
+  decisions independent; use concurrent writers only when mutation ownership is
+  disjoint or the interface between lanes is already frozen. Never run
+  concurrent writers in one checkout.
 
 ## Error Handling
 
@@ -72,3 +79,7 @@ its overhead. Recipes select a shape; they do not authorize delegation:
 - **Parallel output-path conflict:** give each task a distinct output path, or disable output where no artifact is needed.
 - **Worktree launch failure:** ensure the git tree is clean and task cwd overrides match the shared cwd.
 - **Child fails before starting:** inspect `subagent({ action: "status", id: "..." })`, artifact metadata, output logs, and `doctor`; loader errors usually appear in child logs.
+- **A delegated attempt fails:** diagnose the concrete failure and release or
+  resume the existing lane before launching a sibling replacement. A second
+  child repeating the same task is not diagnosis and can create competing
+  ownership.

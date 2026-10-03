@@ -325,7 +325,7 @@ export function resolvePiLaunchToolPlan(
 	const ceilingFilteredBuiltinTools =
 		input.tools === undefined
 			? allowedToolSet
-				? [...allowedToolSet]
+				? [...allowedToolSet].filter((tool) => tool !== "subagent_command")
 				: []
 			: (input.requireReadTool &&
 				requestedBuiltinTools.length > 0 &&

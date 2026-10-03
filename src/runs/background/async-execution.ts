@@ -90,7 +90,7 @@ import { resolvePermissionRules, type PermissionConfig } from "../shared/permiss
 import { normalizeExtensionBindings, omitExtensionBindingsEnv, type ExtensionBindings } from "../shared/extension-bindings.ts";
 import { omitGitRoutingEnv } from "../shared/git-environment.ts";
 import { assertWorkflowLaneKey, normalizeWorkflowLaneMetadata } from "../shared/lane-metadata.ts";
-import { resolveRequiredChildExtensions, type RequiredChildExtensionSnapshot } from "../../shared/required-child-extensions.ts";
+import { assertRequiredChildExtensionsAdmitted, resolveRequiredChildExtensions, writeRetainedRequiredChildExtensions, type RequiredChildExtensionSnapshot } from "../../shared/required-child-extensions.ts";
 
 const require = nodeModule.createRequire(import.meta.url);
 const piPackageRoot = resolveAsyncPiPackageRoot();
@@ -247,6 +247,7 @@ interface AsyncChainParams {
 	/** Global cap on simultaneously-running subagent tasks within the async run. */
 	globalConcurrencyLimit?: number;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
+	requiredExtensions?: RequiredChildExtensionSnapshot;
 	thinkingCeiling?: ThinkingLevel;
 	runFanoutBudget?: RunFanoutBudgetDescriptor;
 	parentWorkflowRunId?: string;
@@ -386,6 +387,8 @@ export interface AsyncRunnerStepBuildParams {
 	/** PI_SUBAGENT_TOOL_TIMEOUT_MS override (lowest precedence). */
 	toolTimeoutMsEnv?: string | undefined;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
+	/** Retained snapshot from the launch being continued; takes precedence over the live registry, as in single launches. */
+	requiredExtensions?: RequiredChildExtensionSnapshot;
 	thinkingCeiling?: ThinkingLevel;
 }
 
@@ -875,11 +878,6 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 	}
 }
 
-/** `model: false` / `thinking: false` clear a value; only real strings reach a launch. */
-function requestString(value: unknown): string | undefined {
-	return typeof value === "string" ? value : undefined;
-}
-
 /**
  * An explicit `thinking: false` clears the level, so only `undefined` falls
  * through to the agent's own value. Treating `false` as absent would silently
@@ -905,9 +903,6 @@ function formatAsyncStartError(mode: SubagentRunMode, message: string): AsyncExe
 	};
 }
 
-const UNAVAILABLE_SUBAGENT_SKILL_ERROR = "Skills not found: pi-subagents";
-
-class UnavailableSubagentSkillError extends Error {}
 class AsyncStartValidationError extends Error {}
 
 export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildParams): AsyncRunnerStepBuildResult {
@@ -1002,6 +997,12 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		const externalRunnerType = a.runner?.type;
 		const machineUnsupported = formatHerdrMachineRunnerUnsupported({ machine: requestedMachine, agentName: a.name, runnerType: a.runner?.type, adapter: a.runner?.type === "external-cli" ? a.runner.adapter : undefined, worktree: s.worktree });
 		if (machineUnsupported) throw new AsyncStartValidationError(machineUnsupported);
+		const registeredExtensions = resolveRequiredChildExtensions(ctx.parentSessionId ?? ctx.currentSessionId ?? undefined);
+		try {
+			assertRequiredChildExtensionsAdmitted([params.requiredExtensions, ctx.childRuntime?.requiredExtensions, registeredExtensions], { agent: a.name, runnerType: a.runner?.type, machine: requestedMachine });
+		} catch (error) {
+			throw new AsyncStartValidationError(error instanceof Error ? error.message : String(error));
+		}
 		let machine: HerdrMachineReference | undefined;
 		let machineEnv: Record<string, string> | undefined;
 		if (requestedMachine) {
@@ -1064,7 +1065,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			a.skillPath,
 			a.filePath ? path.dirname(a.filePath) : stepCwd,
 		);
-		if (missingSkills.includes("pi-subagents")) throw new UnavailableSubagentSkillError(UNAVAILABLE_SUBAGENT_SKILL_ERROR);
+		if (missingSkills.length > 0) throw new AsyncStartValidationError(`Skills not found: ${missingSkills.join(", ")}`);
 
 		// A namespaced parallel output is injected by the runner, not the prompt.
 		const systemPrompt = buildEffectiveSystemPrompt({ agent: a, resolvedSkills, cwd: stepCwd, ...(!namespaceOutputPath && outputPath ? { outputPath } : {}) });
@@ -1097,7 +1098,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		if (claudeCodeAdapter) {
 			try {
 				claudeCodeOverride = resolveClaudeCodeOverride({
-					model: requestString(s.model),
+					model: typeof s.model === "string" ? s.model : undefined,
 					agent: a,
 					thinking: resolveClaudeCodeThinking(thinkingOverride, a.thinking),
 					thinkingCeiling: intersectThinkingCeilings(params.thinkingCeiling, a.maxThinking, ctx.childRuntime?.thinkingCeiling),
@@ -1146,7 +1147,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		const launchRuleError = applyWatchdogLaunchRules({ cwd: machine ? runnerCwd : stepCwd, agent: a.name, model: selectedModel, warn: (violation) => sendRuleViolationWarning(ctx.pi, violation) });
 		if (launchRuleError) throw new AsyncStartValidationError(launchRuleError);
 		const fast = s.fast ?? params.fast ?? a.fast;
-		const requiredExtensions = externalRunner ? [] : ctx.childRuntime?.requiredExtensions ?? resolveRequiredChildExtensions(ctx.parentSessionId ?? ctx.currentSessionId ?? undefined);
+		const requiredExtensions = externalRunner ? [] : params.requiredExtensions ?? ctx.childRuntime?.requiredExtensions ?? registeredExtensions;
 		const toolPlan = resolvePiLaunchToolPlan({
 			tools: a.tools,
 			excludeTools: a.excludeTools,
@@ -1374,7 +1375,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		}
 		return { steps: steps as RunnerStep[], runnerCwd, workflowGraph, eventChain: graphChain, ...(originalTask !== undefined ? { originalTask } : {}) };
 	} catch (error) {
-		if (error instanceof UnavailableSubagentSkillError || error instanceof AsyncStartValidationError) return { error: error.message };
+		if (error instanceof AsyncStartValidationError) return { error: error.message };
 		throw error;
 	}
 }
@@ -1472,6 +1473,7 @@ export function executeAsyncChain(
 		toolTimeoutMsEnv: params.toolTimeoutMsEnv ?? toolTimeoutFromEnv(),
 		capabilityCeiling,
 		thinkingCeiling: params.thinkingCeiling,
+		requiredExtensions: params.requiredExtensions,
 	});
 	if ("error" in built) {
 		try {
@@ -1515,6 +1517,12 @@ export function executeAsyncChain(
 	const initialStatusAt = Date.now();
 	const initialCompletionOwnerId = ctx.completionOwnerId ?? currentCompletionOwnerId();
 	const launchParentSessionId = ctx.parentSessionId ?? ctx.currentSessionId;
+	try {
+		writeRetainedRequiredChildExtensions(asyncDir, params.requiredExtensions ?? ctx.childRuntime?.requiredExtensions ?? resolveRequiredChildExtensions(launchParentSessionId ?? undefined));
+	} catch (error) {
+		fs.rmSync(asyncDir, { recursive: true, force: true });
+		return formatAsyncStartError(resultMode, `Failed to record required child extensions: ${error instanceof Error ? error.message : String(error)}`);
+	}
 
 	let spawnResult: SpawnRunnerResult = {};
 	try {
@@ -1796,6 +1804,12 @@ export function executeAsyncSingle(
 	const requestedMachine = params.machine ?? agentConfig.machine;
 	const machineUnsupported = formatHerdrMachineRunnerUnsupported({ machine: requestedMachine, agentName: agentConfig.name, runnerType: agentConfig.runner?.type, adapter: agentConfig.runner?.type === "external-cli" ? agentConfig.runner.adapter : undefined, worktree: params.worktree });
 	if (machineUnsupported) return formatAsyncStartError("single", machineUnsupported);
+	const registeredExtensions = resolveRequiredChildExtensions(ctx.parentSessionId ?? ctx.currentSessionId ?? undefined);
+	try {
+		assertRequiredChildExtensionsAdmitted([params.requiredExtensions, ctx.childRuntime?.requiredExtensions, registeredExtensions], { agent: agentConfig.name, runnerType: agentConfig.runner?.type, machine: requestedMachine });
+	} catch (error) {
+		return formatAsyncStartError("single", error instanceof Error ? error.message : String(error));
+	}
 	let machine: HerdrMachineReference | undefined;
 	let machineEnv: Record<string, string> | undefined;
 	if (requestedMachine) {
@@ -1831,7 +1845,7 @@ export function executeAsyncSingle(
 		agentConfig.skillPath,
 		agentConfig.filePath ? path.dirname(agentConfig.filePath) : runnerCwd,
 	);
-	if (missingSkills.includes("pi-subagents")) return formatAsyncStartError("single", UNAVAILABLE_SUBAGENT_SKILL_ERROR);
+	if (missingSkills.length > 0) return formatAsyncStartError("single", `Skills not found: ${missingSkills.join(", ")}`);
 
 	const inheritedNestedRoute = inheritedNestedRouteOf(ctx.childRuntime);
 	const nestedAddress = inheritedNestedRoute ? inheritedNestedParentAddressOf(ctx.childRuntime) : undefined;
@@ -1901,7 +1915,7 @@ export function executeAsyncSingle(
 	if (claudeCodeAdapter) {
 		try {
 			singleClaudeCodeOverride = resolveClaudeCodeOverride({
-				model: requestString(params.modelOverride),
+				model: typeof params.modelOverride === "string" ? params.modelOverride : undefined,
 				agent: agentConfig,
 				thinking: resolveClaudeCodeThinking(params.thinkingOverride, agentConfig.thinking),
 				thinkingCeiling: intersectThinkingCeilings(params.thinkingCeiling, agentConfig.maxThinking, ctx.childRuntime?.thinkingCeiling),
@@ -1966,7 +1980,7 @@ export function executeAsyncSingle(
 			return formatAsyncStartError("single", error instanceof Error ? error.message : String(error));
 		}
 	}
-	const requiredExtensions = externalRunner ? [] : params.requiredExtensions ?? ctx.childRuntime?.requiredExtensions ?? resolveRequiredChildExtensions(ctx.parentSessionId ?? ctx.currentSessionId ?? undefined);
+	const requiredExtensions = externalRunner ? [] : params.requiredExtensions ?? ctx.childRuntime?.requiredExtensions ?? registeredExtensions;
 	const toolPlan = resolvePiLaunchToolPlan({
 		tools: agentConfig.tools,
 		excludeTools: agentConfig.excludeTools,

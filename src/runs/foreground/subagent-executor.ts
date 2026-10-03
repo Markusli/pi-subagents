@@ -27,6 +27,7 @@ import { isWorkflowScriptPath, normalizePublicSubagentExecution, validateWorkflo
 import { readReplyWorkflowScript } from "../../extension/reply-workflow-script.ts";
 import { disabledFeatureNotice, disabledFeatureUseError, resolveDisabledFeatureSurface, type DisabledFeatureSurface } from "../../shared/disabled-features.ts";
 import { runSync } from "./execution.ts";
+import { commandAction } from "./command-action.ts";
 import { handleWatchdogToolAction, WATCHDOG_TOOL_ACTIONS } from "../../watchdog/tool-actions.ts";
 import type { MainWatchdogRuntime } from "../../watchdog/runtime.ts";
 import { applyWatchdogLaunchRules } from "../../watchdog/rules.ts";
@@ -73,7 +74,7 @@ import { usageBudgetExceededMessage, usageBudgetState, validateUsageBudgetConfig
 import { assertAgentAllowedByCapabilityCeiling, intersectSubagentCapabilityCeilings, resolveCurrentSubagentCapabilityCeiling, type ResolvedSubagentCapabilityCeiling } from "../shared/capability-ceiling.ts";
 import { isAgentContract } from "../shared/agent-contract.ts";
 import { normalizeExtensionBindings, type ExtensionBindings } from "../shared/extension-bindings.ts";
-import { resolveRequiredChildExtensions } from "../../shared/required-child-extensions.ts";
+import { assertRequiredChildExtensionsAdmitted, hasMandatoryRequiredChildExtensions, readRetainedRequiredChildExtensions, resolveRequiredChildExtensions, type RequiredChildExtensionSnapshot } from "../../shared/required-child-extensions.ts";
 import { finalizeSingleOutput, injectSingleOutputInstruction, normalizeSingleOutputOverride, outputPathMappingFromTask, resolveSingleOutputPath, validateFileOnlyOutputMode } from "../shared/single-output.ts";
 import { assertJsonSchemaObject, cleanupStructuredOutputRuntime, createStructuredOutputRuntime } from "../shared/structured-output.ts";
 import { compactForegroundDetails, getSingleResultOutput, PROMPT_REDACTED, readStatus, resolveChildCwd, sumResultsCost, sumResultsUsage, toAgentToolUsage } from "../../shared/utils.ts";
@@ -220,8 +221,8 @@ import {
 } from "../../shared/types.ts";
 import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 
-const MUTATING_MANAGEMENT_ACTIONS = new Set(["create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "watchdog.configure", "mission.create", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "worktree.cleanup", "lane.recordMerge", "lane.recordSupersession", "refine", "refine.rollback", "dismiss", "schedule.create", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"]);
-const DESTRUCTIVE_MANAGEMENT_ACTIONS = new Set(["delete", "eject", "disable", "reset", "mission.close", "worktree.discard", "refine.rollback", "inspector.close", "project.close", "stop", "interrupt", "schedule.delete"]);
+const MUTATING_MANAGEMENT_ACTIONS = new Set(["command.yield", "command.cancel", "create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "watchdog.configure", "mission.create", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "worktree.cleanup", "lane.recordMerge", "lane.recordSupersession", "refine", "refine.rollback", "dismiss", "schedule.create", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"]);
+const DESTRUCTIVE_MANAGEMENT_ACTIONS = new Set(["command.cancel", "delete", "eject", "disable", "reset", "mission.close", "worktree.discard", "refine.rollback", "inspector.close", "project.close", "stop", "interrupt", "schedule.delete"]);
 
 function resolveSteerDeliveryMode(mode: SubagentParamsLike["mode"]): SteerDeliveryMode | undefined {
 	return mode === "steer" || mode === "follow_up" || mode === "auto" ? mode : undefined;
@@ -328,6 +329,7 @@ export interface SubagentParamsLike {
 	merge?: unknown;
 	supersession?: unknown;
 	index?: number;
+	toolCallId?: string;
 	childId?: string;
 	view?: "fleet" | "transcript";
 	lines?: number;
@@ -533,6 +535,8 @@ interface ExecutionContextData {
 	usageBudget?: UsageBudgetConfig;
 	/** Parent workflow owns this allowance; presence vetoes unverifiable child continuation. */
 	inheritedUsageBudget?: UsageBudgetConfig;
+	/** Mandatory host extensions retained by a parent workflow; they outlive a later registration disposal. */
+	requiredExtensions?: RequiredChildExtensionSnapshot;
 	allowZeroToolBudget?: boolean;
 	configToolBudget?: ResolvedToolBudget;
 	contextPolicy: AgentDefaultContextPolicy;
@@ -1336,6 +1340,16 @@ function appendStepToAsyncChain(input: {
 		};
 	}
 
+	let retainedRequiredExtensions: RequiredChildExtensionSnapshot | undefined;
+	try {
+		retainedRequiredExtensions = readRetainedRequiredChildExtensions(resolved.location.asyncDir);
+	} catch (error) {
+		return {
+			content: [{ type: "text", text: `Cannot append step to run '${resolved.id}': ${error instanceof Error ? error.message : String(error)}` }],
+			isError: true,
+			details: { mode: "management", results: [] },
+		};
+	}
 	const pendingAppendRequests = readPendingChainAppendRequests(resolved.location.asyncDir);
 	const reservedOutputNames = new Set<string>([
 		...Object.keys(status.outputs ?? {}),
@@ -1406,6 +1420,7 @@ function appendStepToAsyncChain(input: {
 		asyncDir: resolved.location.asyncDir,
 		validateOutputBindings: false,
 		capabilityCeiling: intersectSubagentCapabilityCeilings(status.capabilityCeiling, resolveCurrentSubagentCapabilityCeiling(asyncCtx.currentSessionId)),
+		requiredExtensions: retainedRequiredExtensions,
 	}));
 	if ("error" in built) {
 		return {
@@ -3547,6 +3562,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			goal: params.task ?? "",
 			agentConfig: a,
 			recoveryAgentConfig: data.recoveryAgents.find((agent) => agent.name === params.agent),
+			requiredExtensions: data.requiredExtensions,
 			ctx: asyncCtx,
 			availableModels,
 			cwd: effectiveCwd,
@@ -4033,8 +4049,12 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	}
 	let foregroundMachine: import("../../shared/types.ts").HerdrMachineReference | undefined;
 	const requestedMachine = params.machine ?? agentConfig.machine;
+	const requiredExtensions = data.requiredExtensions ?? deps.childRuntime?.requiredExtensions ?? resolveRequiredChildExtensions(data.parentPiSessionId);
 	if (requestedMachine) {
-		try { foregroundMachine = resolveHerdrMachinePlacement({ machine: requestedMachine, cwd: ctx.cwd, stepCwd: params.machineCwd }).machine; }
+		try {
+			assertRequiredChildExtensionsAdmitted([requiredExtensions], { agent: agentConfig.name, runnerType: agentConfig.runner?.type, machine: requestedMachine });
+			foregroundMachine = resolveHerdrMachinePlacement({ machine: requestedMachine, cwd: ctx.cwd, stepCwd: params.machineCwd }).machine;
+		}
 		catch (error) { return toExecutionErrorResult(params, error instanceof Error ? error : new Error(String(error)), data.contextPolicy.contextSummary); }
 	}
 	const effectiveToolBudget = resolveEffectiveToolBudget(omitUndefinedProperties({ runBudget: data.toolBudget, agentBudget: agentConfig.toolBudget, configBudget: data.configToolBudget }));
@@ -4229,7 +4249,6 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		: undefined;
 
 	const deadlineAt = data.deadlineAt ?? (data.timeoutMs !== undefined ? Date.now() + data.timeoutMs : undefined);
-	const requiredExtensions = deps.childRuntime?.requiredExtensions ?? resolveRequiredChildExtensions(data.parentPiSessionId);
 	let r: Awaited<ReturnType<typeof runSync>> | undefined;
 	let resolveDetachedWorkflowChild: ((result: Awaited<ReturnType<typeof runSync>>) => void) | undefined;
 	const detachedWorkflowChild = params.workflowAwaitDetached === true
@@ -4482,6 +4501,7 @@ function duplicateSubagentCallResult(params: SubagentParamsLike): AgentToolResul
 
 const workflowLaunchObservers = new WeakMap<object, (launch: { agent: string; sessionName?: string; sessionFile?: string; async: boolean; runId?: string }) => void>();
 const workflowOwnedUsageBudgets = new WeakMap<object, UsageBudgetConfig>();
+const workflowRetainedRequiredExtensions = new WeakMap<object, RequiredChildExtensionSnapshot>();
 
 /**
  * Terminal-mission retention can remove a mission while its children still
@@ -5286,6 +5306,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 	): Promise<AgentToolResult<Details>> => {
 		const workflowLaunchObserver = workflowLaunchObservers.get(params);
 		const inheritedUsageBudget = workflowOwnedUsageBudgets.get(params);
+		const retainedRequiredExtensions = workflowRetainedRequiredExtensions.get(params);
 		const delegatedThinkingOverride = delegatedThinkingOverrides.get(params);
 		const allowZeroToolBudget = delegatedZeroToolBudgets.has(params);
 		const delegatedExecution = delegatedExecutions.has(params);
@@ -5368,6 +5389,9 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			}
 			const acceptanceErrors = validateAcceptanceInput(requestParams.acceptance);
 			if (acceptanceErrors.length > 0) return buildRequestedModeError(requestParams, acceptanceErrors.join(" "));
+			// Capture mandatory host extensions at admission: script children may launch after the host disposes its registration.
+			const admittedRequiredExtensions = retainedRequiredExtensions ?? deps.childRuntime?.requiredExtensions ?? resolveRequiredChildExtensions(ctx.sessionManager.getSessionId() ?? undefined);
+			const workflowRequiredExtensions = hasMandatoryRequiredChildExtensions(admittedRequiredExtensions) ? admittedRequiredExtensions : undefined;
 			const foregroundWorkflowRunId = encodeIndexSegment(_id);
 			if (delegatedWorkflowPermit) {
 				const permitError = validateWorkflowChildPermitRoot(delegatedWorkflowPermit, foregroundWorkflowRunId);
@@ -6168,6 +6192,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 									);
 									preparedChildParams = childRequest;
 									if (workflowUsageBudget.budget) workflowOwnedUsageBudgets.set(childRequest, workflowUsageBudget.budget);
+									if (workflowRequiredExtensions) workflowRetainedRequiredExtensions.set(childRequest, workflowRequiredExtensions);
 									workflowLaunchObservers.set(childRequest, (launch) => {
 										if (launch.runId) appendWorkflowChildJournal(asyncDir, { type: "start", key, fingerprint: journalFingerprint, runId: launch.runId });
 										const step = status.steps?.find((candidate) => candidate.workflowKey === key);
@@ -6453,6 +6478,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 							);
 							preparedChildParams = childRequest;
 							if (workflowUsageBudget.budget) workflowOwnedUsageBudgets.set(childRequest, workflowUsageBudget.budget);
+							if (workflowRequiredExtensions) workflowRetainedRequiredExtensions.set(childRequest, workflowRequiredExtensions);
 							if (delegatedWorkflowPermit) {
 								if (childRequest.async !== false) throw new Error("Workflow child permit supports one foreground child only.");
 								const childCwd = resolveRequestedCwd(workflowCwd, childRequest.cwd);
@@ -6692,7 +6718,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true, details: { mode: "management", results: [] } };
 				}
 			}
-			const policyAction = action === "stop" ? "stopRun" : action === "steer" ? "steerRun" : action === "schedule.create" ? "scheduleCreate" : action === "inspector.open" ? "inspectorOpen" : action === "project.open" ? "projectOpen" : undefined;
+			const policyAction = action === "stop" || action === "command.cancel" ? "stopRun" : action === "steer" || action === "command.yield" ? "steerRun" : action === "schedule.create" ? "scheduleCreate" : action === "inspector.open" ? "inspectorOpen" : action === "project.open" ? "projectOpen" : undefined;
 			if (policyAction) {
 				// Child-safe mode is a hard capability boundary; the policy is an operator
 				// preference. Refuse first, so the gate never prompts for an action that is
@@ -6914,6 +6940,19 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					}],
 					details: { mode: "management", results: [], spawnBudget, activeAsyncCapacity },
 				};
+			}
+			if (["command.status", "command.yield", "command.cancel"].includes(action)) {
+				try {
+					if (deps.allowMutatingManagementActions === false && action !== "command.status") throw new Error(`Action '${action}' is not available from child-safe subagent fanout mode.`);
+					const targetRunId = paramsWithResolvedCwd.id ?? paramsWithResolvedCwd.runId;
+					if (!targetRunId || paramsWithResolvedCwd.dir) throw new Error(`${action} requires id or runId; directory targets are not supported.`);
+					deps.state.currentSessionId = resolveCurrentSessionId(ctx.sessionManager);
+					const target = resolveSubagentRunId(targetRunId, { state: deps.state, nested: nestedResolutionScopeForExecutor(deps) });
+					if (!target) throw new Error(`No run found for '${targetRunId}'.`);
+					return await commandAction({ state: deps.state, target, operation: action.slice("command.".length) as "status" | "yield" | "cancel", index: paramsWithResolvedCwd.index, toolCallId: paramsWithResolvedCwd.toolCallId, signal });
+				} catch (error) {
+					return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true, details: { mode: "management", results: [] } };
+				}
 			}
 			if (action === "status" || action === "debug.run") {
 				if (!preserveActiveSession) deps.state.currentSessionId = resolveCurrentSessionId(ctx.sessionManager);
@@ -7622,6 +7661,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			toolBudget: runToolBudget.toolBudget,
 			usageBudget: usageBudget.budget,
 			inheritedUsageBudget,
+			requiredExtensions: retainedRequiredExtensions,
 			allowZeroToolBudget,
 			configToolBudget: configToolBudget.toolBudget,
 			configToolTimeoutMs: deps.config.toolTimeoutMs,

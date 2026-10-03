@@ -3,18 +3,14 @@
  *
  * These drive the real step builder and the real launch validation, so they
  * prove the request reaches the adapter instead of only that the token helper
- * returns the expected array. They assert on built steps rather than on a
- * spawned CLI: the adapter runs its command with `shell: false`, and Node
- * refuses to spawn a `.cmd` that way, so a fake command cannot run on Windows.
- * The tokens-to-argv link is covered by `claude-code-adapter.test.ts`, which
- * spawns the real Node binary.
+ * returns the expected array. They assert on built steps; a real launch is
+ * covered by `test/integration/claude-code-dispatch.test.ts`.
  */
 
 import assert from "node:assert/strict";
 import * as path from "node:path";
 import { describe, it } from "node:test";
 import { buildAsyncRunnerSteps, executeAsyncSingle, resolveClaudeCodeThinking } from "../../src/runs/background/async-execution.ts";
-import { resolveClaudeCodeLaunch } from "../../src/runs/shared/claude-code-adapter.ts";
 import type { AgentConfig } from "../../src/agents/agents.ts";
 
 const artifactsOff = { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 };
@@ -43,15 +39,15 @@ const ctx = {
 	modelScope: undefined,
 };
 
-function build(chain: Parameters<typeof buildAsyncRunnerSteps>[1]["chain"], agents: AgentConfig[], overrides: Record<string, unknown> = {}) {
+function build(chain: Parameters<typeof buildAsyncRunnerSteps>[1]["chain"], agents: AgentConfig[], overrides: Partial<Parameters<typeof buildAsyncRunnerSteps>[1]> = {}) {
 	return buildAsyncRunnerSteps("cc-dispatch", {
 		chain,
 		agents,
-		ctx,
+		ctx: ctx as Parameters<typeof buildAsyncRunnerSteps>[1]["ctx"],
 		asyncDir: path.join(process.cwd(), ".tmp-cc-dispatch"),
 		maxSubagentDepth: 2,
 		...overrides,
-	} as Parameters<typeof buildAsyncRunnerSteps>[1]);
+	});
 }
 
 function firstArgs(built: ReturnType<typeof buildAsyncRunnerSteps>): string[] | undefined {
@@ -124,15 +120,6 @@ describe("Claude Code override dispatch", () => {
 		assert.equal(resolveClaudeCodeThinking(undefined, "high"), "high");
 		assert.equal(resolveClaudeCodeThinking("low", "high"), "low");
 		assert.equal(resolveClaudeCodeThinking(false, false), undefined);
-	});
-
-	it("hands the built step's tokens to the adapter launch", () => {
-		const built = build([{ agent: "claude-code", task: "Review", model: "claude-opus-5.5:high" }], [agent("claude-code")]);
-		// The runner passes the step field straight through as overrideArgs.
-		const launch = resolveClaudeCodeLaunch({ adapter: "claude-code", command: "claude", overrideArgs: firstArgs(built) });
-		assert.deepEqual(launch.args.slice(-4), ["--model", "claude-opus-5.5", "--effort", "high"]);
-		assert.deepEqual(launch.preflight.versionArgs, ["--version"]);
-		assert.deepEqual(launch.preflight.helpArgs, ["--help"]);
 	});
 
 	it("rejects an effort above maxThinking before the child starts", () => {

@@ -8,6 +8,7 @@ import { parse as parseYaml } from "yaml";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createAtomicJsonWriter } from "../shared/atomic-json.ts";
 import type { AcceptanceInput, AcceptanceRole, AgentRunnerConfig, JsonSchemaObject, OutputMode, ToolBudgetConfig } from "../shared/types.ts";
 import { CODE_OWNED_EXTERNAL_CLI_ADAPTER_LABEL, isCodeOwnedExternalCliAdapterId, parseExternalCliCapabilityNarrowing, validateCodeOwnedProfileRunner } from "../runs/shared/external-cli-contract.ts";
 import { isClaudeCodeAdapterId } from "../runs/shared/claude-code-adapter.ts";
@@ -945,7 +946,58 @@ function readSettingsFileStrict(filePath: string): Record<string, unknown> {
 
 function writeSettingsFile(filePath: string, settings: Record<string, unknown>): void {
 	fs.mkdirSync(path.dirname(filePath), { recursive: true });
-	fs.writeFileSync(filePath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+	const targetPath = resolveSettingsWriteTarget(filePath);
+	let existingMode: number | undefined;
+	try {
+		existingMode = fs.statSync(targetPath).mode & 0o7777;
+	} catch (error) {
+		if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+	}
+	if (existingMode !== undefined) fs.accessSync(targetPath, fs.constants.W_OK);
+
+	const tempMode = existingMode === undefined ? undefined : existingMode | 0o200;
+	// Reuse the atomic temp/rename path while retaining settings' newline and existing mode.
+	const writeAtomicSettings = createAtomicJsonWriter({
+		mode: tempMode,
+		fs: {
+			mkdirSync: fs.mkdirSync,
+			writeFileSync: (tempPath, data, options) => {
+				return fs.writeFileSync(tempPath, `${data}\n`, options);
+			},
+			renameSync: (sourcePath, destinationPath) => {
+				if (existingMode !== undefined) fs.chmodSync(sourcePath, existingMode);
+				fs.renameSync(sourcePath, destinationPath);
+			},
+			rmSync: fs.rmSync,
+		},
+	});
+	writeAtomicSettings(targetPath, settings);
+}
+
+function resolveSettingsWriteTarget(filePath: string): string {
+	let targetPath = filePath;
+	for (;;) {
+		try {
+			return fs.realpathSync.native(targetPath);
+		} catch (error) {
+			if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+			// A trailing separator requires a directory; it cannot name a new settings file.
+			if (targetPath.endsWith("/") || targetPath.endsWith(path.sep)) throw error;
+		}
+
+		// A missing target is allowed only when its physical parent already exists.
+		const parentPath = fs.realpathSync.native(path.dirname(targetPath));
+		const unresolvedPath = path.join(parentPath, path.basename(targetPath));
+		let linkText: string;
+		try {
+			linkText = fs.readlinkSync(unresolvedPath);
+		} catch (error) {
+			if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+			return unresolvedPath;
+		}
+		// Keep link text intact so the filesystem follows directory links before "..".
+		targetPath = path.isAbsolute(linkText) ? linkText : `${parentPath}${path.sep}${linkText}`;
+	}
 }
 
 function parseOverrideStringArrayOrFalse(

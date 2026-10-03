@@ -131,6 +131,21 @@ describe("child tool plan declared tools", () => {
 		assert.deepEqual(plan.warnings, []);
 	});
 
+	it("grants command observation only when explicitly declared", () => {
+		const automatic = resolvePiLaunchToolPlan({ tools: ["bash"] });
+		assert.deepEqual(automatic.effectiveToolAllowlist, ["bash"]);
+		assert.deepEqual(automatic.requiredChildTools, ["bash"]);
+		const explicit = resolvePiLaunchToolPlan({ tools: ["bash", "subagent_command"] });
+		assert.deepEqual(explicit.requiredChildTools, ["bash", "subagent_command"]);
+	});
+
+	it("does not enable command controls through a ceiling alone and honors explicit exclusions", () => {
+		const ceiling = { version: 1 as const, allowedTools: ["bash", "subagent_command"], denyExtensions: false, sources: ["test"] };
+		assert.deepEqual(resolvePiLaunchToolPlan({ capabilityCeiling: ceiling }).effectiveToolAllowlist, ["bash"]);
+		assert.deepEqual(resolvePiLaunchToolPlan({ tools: ["bash", "subagent_command"], excludeTools: ["subagent_command"] }).effectiveToolAllowlist, ["bash"]);
+		assert.deepEqual(resolvePiLaunchToolPlan({ tools: ["bash", "subagent_command"], capabilityCeiling: { ...ceiling, allowedTools: ["bash"] } }).effectiveToolAllowlist, ["bash"]);
+	});
+
 	it("adds read for lazy skill loading without an explicit declaration", () => {
 		const plan = resolvePiLaunchToolPlan({ tools: ["bash"], requireReadTool: true });
 		assert.deepEqual(plan.requiredChildTools, ["read", "bash"]);

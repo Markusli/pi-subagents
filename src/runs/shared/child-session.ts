@@ -11,7 +11,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { CHILD_COMMAND_TOOL, createChildCommandRuntime } from "./child-commands.ts";
+import { supervisorChannelDir } from "./child-tool-plan.ts";
 import { pinChildCacheRetention } from "../../shared/child-cache-retention.ts";
 import { getAgentDir, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
 import { resolvePackageSubpath } from "../background/runner-aliases.ts";
@@ -104,6 +106,8 @@ export interface ChildSession {
 	abort(): Promise<void>;
 	/** Emits `session_shutdown` to the child's extensions and disposes the session; resolves once that shutdown work is done. */
 	dispose(): Promise<void>;
+	/** Final settlement check for commands owned by this child; unfinished commands are cancelled and reject completion. */
+	finishCommands?(): Promise<void>;
 	/** True while Pi still has steering or follow-up input that has not started a turn. */
 	hasQueuedMessages?(): boolean;
 	readonly messages: readonly AgentMessage[];
@@ -193,6 +197,30 @@ function prioritizeChildPromptRuntime<T extends { extensions: Array<{ path: stri
 	const [promptRuntime] = extensions.splice(index, 1);
 	if (!promptRuntime) return result;
 	extensions.unshift(promptRuntime);
+	return { ...result, extensions };
+}
+
+/** Ambient bash overrides keep their original backend and priority. */
+function prioritizeChildCommandRuntime<T extends { extensions: Array<{ path: string; tools?: Map<string, unknown> }> }>(result: T): T {
+	const index = result.extensions.findIndex(({ path }) => path === "<inline:pi-subagents:commands>");
+	if (index < 0) return result;
+	if (result.extensions.some((extension, otherIndex) => otherIndex !== index && extension.tools?.has("bash"))) {
+		const extensions = result.extensions.filter((_, otherIndex) => otherIndex !== index);
+		if (!extensions.some((extension) => extension.tools?.has(CHILD_COMMAND_TOOL))) {
+			const commands = result.extensions[index]!;
+			const registered = commands.tools!.get(CHILD_COMMAND_TOOL) as { definition: ToolDefinition };
+			const reason = "Native command controls are unavailable with the active custom bash backend. Use that backend's own command controls.";
+			extensions.push({ ...commands, tools: new Map([[CHILD_COMMAND_TOOL, { ...registered, definition: {
+				...registered.definition, description: reason,
+				execute: async () => { throw new Error(reason); },
+			} }]]) });
+		}
+		return { ...result, extensions };
+	}
+	if (index === 0) return result;
+	const extensions = [...result.extensions];
+	const [commands] = extensions.splice(index, 1);
+	extensions.unshift(commands!);
 	return { ...result, extensions };
 }
 
@@ -391,6 +419,11 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 				? await pi.ModelRuntime.create()
 				: await sharedRuntime(pi);
 			const agentDir = getAgentDir();
+			const commands = launch.runtime.runId && launch.runtime.agent && launch.runtime.childIndex !== undefined
+				&& launch.tools?.includes("bash") && launch.tools.includes(CHILD_COMMAND_TOOL)
+				&& !launch.excludeTools?.includes("bash") && !launch.excludeTools?.includes(CHILD_COMMAND_TOOL)
+				&& typeof pi.createBashTool === "function"
+				? createChildCommandRuntime(supervisorChannelDir(launch.runtime.runId, launch.runtime.agent, launch.runtime.childIndex)) : undefined;
 			const settingsManager = pi.SettingsManager.create(launch.cwd, agentDir, { projectTrusted: launch.projectTrusted });
 			// Foreground children share Pi's global theme with the parent, so reinitializing it
 			// would overwrite the parent's active light/dark appearance. Detached runners have
@@ -420,8 +453,11 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 				noThemes: true,
 				noContextFiles: launch.noContextFiles,
 				additionalExtensionPaths: builtinMcp ? [...launch.extensionPaths, "builtin:mcp"] : launch.extensionPaths,
-				extensionFactories: [...launch.hooks, ...codemode, ...(builtinMcp ? [builtinMcp] : [])],
-				extensionsOverride: prioritizeChildPromptRuntime,
+				extensionFactories: [...launch.hooks, ...(commands ? [{ name: "pi-subagents:commands", factory: (api: ExtensionAPI) => {
+					api.registerTool(commands.wrap(pi.createBashTool(launch.cwd, { commandPrefix: settingsManager.getShellCommandPrefix(), shellPath: settingsManager.getShellPath() }) as unknown as ToolDefinition));
+					api.registerTool(commands.tool());
+				} }] : []), ...codemode, ...(builtinMcp ? [builtinMcp] : [])],
+				extensionsOverride: (result) => prioritizeChildPromptRuntime(prioritizeChildCommandRuntime(result)),
 				...(launch.systemPrompt !== undefined ? { systemPrompt: launch.systemPrompt } : {}),
 				...(launch.appendSystemPrompt !== undefined ? { appendSystemPrompt: [launch.appendSystemPrompt] } : {}),
 			});
@@ -430,6 +466,7 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 			// watchers, servers, and timers. Do the same, then dispose.
 			const shutdownSession = async (session: Awaited<ReturnType<PiCodingAgentModule["createAgentSession"]>>["session"]): Promise<void> => {
 				try {
+					await commands?.shutdown();
 					const runner = session.extensionRunner;
 					if (runner.hasHandlers("session_shutdown")) {
 						await Promise.race([runner.emit({ type: "session_shutdown", reason: "quit" }), new Promise<void>((resolve) => setTimeout(resolve, shutdownTimeoutMs).unref?.())]);
@@ -530,6 +567,7 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 			const child: ChildSession = {
 				subscribe: (listener) => session.subscribe((event) => listener(event as unknown as ChildSessionEvent)),
 				prompt: (text) => session.prompt(text),
+				...(commands ? { finishCommands: () => commands.finish() } : {}),
 				steer: (text) => session.steer(text),
 				followUp: (text) => session.followUp(text),
 				abort: () => session.abort(),

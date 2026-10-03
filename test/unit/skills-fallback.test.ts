@@ -663,6 +663,105 @@ Fallback global agent.
 		}
 	});
 
+	it("discovers enabled pi-codex-marketplace skills from state.json", async () => {
+		const fakeHome = path.join(tempDir, "fake-home");
+		const userAgentDir = path.join(fakeHome, ".pi", "agent");
+		const snapshot = "snapshot-123";
+		const skillDir = path.join(
+			userAgentDir,
+			"codex-marketplace",
+			"cache",
+			"entries",
+			snapshot,
+			"plugins",
+			"ducklake",
+			"skills",
+			"query-ducklake",
+		);
+		const previousHome = process.env.HOME;
+		const previousUserProfile = process.env.USERPROFILE;
+
+		try {
+			process.env.HOME = fakeHome;
+			process.env.USERPROFILE = fakeHome;
+			writeSkillFile(skillDir, "Query DuckLake safely.", "Query DuckLake");
+			fs.mkdirSync(path.join(userAgentDir, "codex-marketplace"), { recursive: true });
+			fs.writeFileSync(
+				path.join(userAgentDir, "codex-marketplace", "state.json"),
+				JSON.stringify({
+					installations: [{
+						pluginId: "ducklake",
+						enabled: true,
+						installationState: "enabled",
+						snapshot,
+						skills: ["query-ducklake"],
+					}],
+				}, null, 2),
+				"utf-8",
+			);
+
+			const fresh = await importSkillsFresh();
+			fresh.clearSkillCache();
+			const { resolved, missing } = fresh.resolveSkills(["query-ducklake"], tempDir);
+			assert.deepEqual(missing, []);
+			assert.equal(resolved[0]?.source, "user-settings");
+			assert.match(resolved[0]?.content ?? "", /Query DuckLake safely/);
+		} finally {
+			if (previousHome === undefined) delete process.env.HOME;
+			else process.env.HOME = previousHome;
+			if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+			else process.env.USERPROFILE = previousUserProfile;
+		}
+	});
+
+	it("does not discover disabled pi-codex-marketplace installations", async () => {
+		const fakeHome = path.join(tempDir, "fake-home");
+		const userAgentDir = path.join(fakeHome, ".pi", "agent");
+		const snapshot = "snapshot-456";
+		const skillDir = path.join(
+			userAgentDir,
+			"codex-marketplace",
+			"cache",
+			"entries",
+			snapshot,
+			"plugins",
+			"ducklake",
+			"skills",
+			"query-ducklake",
+		);
+		const previousHome = process.env.HOME;
+		const previousUserProfile = process.env.USERPROFILE;
+
+		try {
+			process.env.HOME = fakeHome;
+			process.env.USERPROFILE = fakeHome;
+			writeSkillFile(skillDir, "Should stay disabled.");
+			fs.mkdirSync(path.join(userAgentDir, "codex-marketplace"), { recursive: true });
+			fs.writeFileSync(
+				path.join(userAgentDir, "codex-marketplace", "state.json"),
+				JSON.stringify({
+					installations: [{
+						pluginId: "ducklake",
+						enabled: false,
+						installationState: "disabled",
+						snapshot,
+						skills: ["query-ducklake"],
+					}],
+				}, null, 2),
+				"utf-8",
+			);
+
+			const fresh = await importSkillsFresh();
+			fresh.clearSkillCache();
+			assert.equal(fresh.discoverAvailableSkills(tempDir).some((skill) => skill.name === "query-ducklake"), false);
+		} finally {
+			if (previousHome === undefined) delete process.env.HOME;
+			else process.env.HOME = previousHome;
+			if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+			else process.env.USERPROFILE = previousUserProfile;
+		}
+	});
+
 	it("resolves agent-local files and directories before global skills without publishing them", () => {
 		makeProjectSkill(tempDir, "shared", "global body");
 		const agentDir = path.join(tempDir, "agents", "nested");

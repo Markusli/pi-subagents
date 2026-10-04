@@ -25,6 +25,7 @@ import { buildAdvertisedAgentCatalog, buildAdvertisedAgentPrompt } from "../agen
 import { clearRuntimeAgentsForPi, listRuntimeAgentConfigs, mergeRuntimeAgents } from "../agents/runtime-agent-registry.ts";
 import { registerRuntimeAgentEventListener } from "../agents/runtime-agent-events.ts";
 import { ensureAccessibleDir } from "../shared/accessible-dir.ts";
+import { appendEngineeringPolicy, readEngineeringPolicy } from "../shared/engineering-policy.ts";
 import { cleanupAllArtifactDirs, cleanupOldArtifacts, getArtifactsDir } from "../shared/artifacts.ts";
 import { resolveCurrentSessionId } from "../shared/session-identity.ts";
 import { getAgentDir } from "../shared/utils.ts";
@@ -79,6 +80,8 @@ import { loadConfig, resolveAsyncByDefault, resolveScheduledStoreRoot } from "./
 import { buildSubagentToolDescription, buildSubagentToolPromptMetadata } from "./tool-description.ts";
 import { formatWorkflowPreflightSummary, normalizeWorkflowPreflight } from "../workflows/workflow-preflight.ts";
 import { runtimeReplacedAbortReason } from "../workflows/workflow-reuse.ts";
+import { registerOrchestrationMode } from "./orchestration-mode.ts";
+import { registerClefDecisions } from "./clef-decisions.ts";
 import { finalizeToolResult } from "./tool-result.ts";
 import { removedModelWorkflowFieldError } from "./public-execution.ts";
 import { collectGoalContinuationNotices } from "../missions/goal-driver.ts";
@@ -317,6 +320,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	if (process.env[SUBAGENT_CHILD_ENV] === "1") {
 		return;
 	}
+	registerClefDecisions(pi);
+	registerOrchestrationMode(pi);
 	const runtimeRegistry = getRuntimeRegistry();
 	setMainThinkingLevelSource(() => readMainThinkingLevel(() => pi.getThinkingLevel()));
 
@@ -325,6 +330,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	cleanupOldChainDirs();
 
 	const config = loadConfig();
+	let engineeringPolicy = readEngineeringPolicy();
 	const waitToolConfig = resolveWaitToolConfig(config.waitTool);
 	const asyncByDefault = resolveAsyncByDefault(config);
 	const fleetViewEnabled = config.fleetView !== false;
@@ -794,6 +800,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		await waitForAdvertisement();
 		if (!event.systemPromptOptions.selectedTools.includes("subagent")) return;
 		const sessionId = state.currentSessionId ?? resolveCurrentSessionId(ctx.sessionManager);
+<<<<<<< HEAD
 		// Structured sections let Pi append a transcript delta instead of replacing the
 		// cached system prompt. Set the section on every turn it applies: Pi rebuilds the
 		// options each turn, and an unset turn records a removal.
@@ -802,6 +809,20 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	});
 
 	registerWaitTool(pi, state, waitToolConfig.enabled, waitSubscriptionManager, waitToolConfig.defaultTimeoutMs, undefined, supervisorChannel.hasPendingRequests);
+=======
+		const advertisedPrompt = Array.isArray(selectedTools) && selectedTools.includes("subagent")
+			? buildAdvertisedAgentPrompt(advertisedAgents, resolveCurrentSubagentCapabilityCeiling(sessionId))
+			: undefined;
+		const systemPrompt = appendEngineeringPolicy(appendAdvertisedAgentPrompt(event.systemPrompt, advertisedPrompt), engineeringPolicy);
+		if (systemPrompt !== event.systemPrompt) return { systemPrompt };
+	});
+
+	pi.on("session_start", () => {
+		engineeringPolicy = readEngineeringPolicy();
+	});
+
+	registerWaitTool(pi, state, waitToolConfig.enabled, waitSubscriptionManager, waitToolConfig.defaultTimeoutMs);
+>>>>>>> 4d20fd30 (wip: checkpoint orchestration changes before Pi 1 upgrade)
 
 	pi.on("agent_end", async (_event, ctx) => {
 		try {

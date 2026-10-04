@@ -1103,6 +1103,32 @@ describe("subagent prompt runtime", () => {
 		assert.ok(rewritten.systemPrompt.includes("Current date: 2026-04-16"));
 	});
 
+	it("always inherits ENGINEERING.md even when project and global context are disabled", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-child-engineering-policy-"));
+		const previous = process.env.PI_CODING_AGENT_DIR;
+		try {
+			process.env.PI_CODING_AGENT_DIR = dir;
+			fs.writeFileSync(path.join(dir, "ENGINEERING.md"), "One fact, one authority.\n");
+			let beforeAgentStart: ((event: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>) | undefined;
+			registerSubagentPromptRuntime({
+				on(event: string, handler: (payload: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>) {
+					if (event === "before_agent_start") beforeAgentStart = handler;
+				},
+				getAllTools: () => [{ name: "intercom" }, { name: "contact_supervisor" }],
+			} as { on(event: string, handler: (payload: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>): void; getAllTools(): Array<{ name: string }> }, childConfig({ inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false }));
+
+			const rewritten = await beforeAgentStart?.({ systemPrompt: BASE_PROMPT });
+			assert.ok(rewritten);
+			assert.match(rewritten.systemPrompt, /# Global Engineering Policy/);
+			assert.match(rewritten.systemPrompt, /One fact, one authority\./);
+			assert.doesNotMatch(rewritten.systemPrompt, /# Project Context/);
+		} finally {
+			if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previous;
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("uses the fanout boundary through before_agent_start for a fanout child", async () => {
 		let beforeAgentStart: ((event: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>) | undefined;
 		registerSubagentPromptRuntime({

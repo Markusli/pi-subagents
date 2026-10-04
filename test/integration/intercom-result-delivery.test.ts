@@ -1303,6 +1303,38 @@ describe("intercom result delivery cutover", { skip: !available ? "executor not 
 		}
 	});
 
+	it("user-scoped resume refuses a persisted role that is no longer user-owned", async () => {
+		const runId = `resume-user-scope-${Date.now()}`;
+		const asyncDir = path.join(ASYNC_DIR, runId);
+		const sessionFile = path.join(tempDir, "user-scope-child.jsonl");
+		try {
+			fs.mkdirSync(asyncDir, { recursive: true });
+			fs.writeFileSync(sessionFile, "", "utf-8");
+			fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({
+				runId, sessionId: "session-123", mode: "single", state: "paused", startedAt: 100, lastUpdate: 200, cwd: tempDir,
+				steps: [{ agent: "runtime-writer", status: "paused", sessionFile }],
+			}, null, 2), "utf-8");
+			writeRecoveryDescriptor(asyncDir, runId, "runtime-writer", {
+				model: "anthropic/claude-sonnet-4:high",
+				tools: ["bash", "write"],
+			});
+			const { executor } = makeExecutor({ agents: [] });
+
+			const result = await executor.execute(
+				"resume-user-scope",
+				{ action: "resume", id: runId, message: "Continue.", agentScope: "user" },
+				new AbortController().signal,
+				undefined,
+				makeMinimalCtx(tempDir),
+			);
+
+			assert.equal(result.isError, true);
+			assert.match(result.content[0]?.text ?? "", /not an active user-owned role/);
+		} finally {
+			fs.rmSync(asyncDir, { recursive: true, force: true });
+		}
+	});
+
 	it("rejects concurrent direct revival of the same completed async session and releases ownership", async () => {
 		const releasePath = path.join(tempDir, "release-async-revival");
 		mockPi.onCall({ waitForPath: releasePath, output: "first revived answer" });

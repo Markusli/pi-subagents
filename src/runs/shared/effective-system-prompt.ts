@@ -2,6 +2,7 @@ import type { AgentConfig } from "../../agents/agents.ts";
 import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
 import { appendAgentRefinementOverlay } from "../../agents/agent-refinements.ts";
 import { buildSkillInjection } from "../../agents/skills.ts";
+import { appendEngineeringPolicy, readEngineeringPolicy } from "../../shared/engineering-policy.ts";
 import { injectOutputPathSystemPrompt } from "./single-output.ts";
 
 export interface EffectiveSystemPromptInput {
@@ -29,5 +30,6 @@ export function buildEffectiveSystemPrompt(input: EffectiveSystemPromptInput): s
 	const memoryInjection = buildAgentMemoryInjection(input.agent, input.cwd);
 	if (memoryInjection) prompt = appendSection(prompt, memoryInjection);
 	prompt = appendAgentRefinementOverlay(prompt, { cwd: input.cwd, agentName: input.agent.name });
-	return injectOutputPathSystemPrompt(prompt, input.outputPath, input.agent);
+	prompt = injectOutputPathSystemPrompt(prompt, input.outputPath, input.agent);
+	return appendEngineeringPolicy(prompt, readEngineeringPolicy());
 }

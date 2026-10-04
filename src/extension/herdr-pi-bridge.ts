@@ -14,6 +14,7 @@ import { appendAgentRefinementOverlay } from "../agents/agent-refinements.ts";
 import { rewriteSubagentPrompt } from "../runs/shared/subagent-prompt-runtime.ts";
 import { resolveExistingReadPaths } from "../shared/settings.ts";
 import { MODEL_ONLY_TOOL } from "../shared/extension-context.ts";
+import { appendEngineeringPolicy, readEngineeringPolicy } from "../shared/engineering-policy.ts";
 
 interface PendingRequest { operation: "prompt" | "steer" | "follow-up" | "abort" | "supervisor-reply"; text?: string; supervisorId?: string }
 interface BridgeContext {
@@ -46,6 +47,7 @@ export function resolveRemoteHerdrResources(cwd: string, resources: { agent: str
 }
 
 export default function registerHerdrPiBridge(pi: ExtensionAPI): void {
+	const engineeringPolicy = readEngineeringPolicy();
 	const runId = validateHerdrPiRunId(process.env[HERDR_PI_RUN_ENV]);
 	const runDir = process.env[HERDR_PI_RUNTIME_DIR_ENV];
 	if (!runDir || !path.isAbsolute(runDir) || fs.lstatSync(runDir).isSymbolicLink()) throw new Error("Herdr bridge runtime directory was not authoritatively provisioned.");
@@ -111,7 +113,7 @@ export default function registerHerdrPiBridge(pi: ExtensionAPI): void {
 	pi.registerCommand("pi-subagents-bridge", { description: "Internal pane-native request dispatch", handler: (args, ctx) => execute(args.trim(), ctx as unknown as BridgeContext) });
 
 	const on = pi.on as unknown as (name: string, handler: (event: Record<string, unknown>, ctx: BridgeContext) => unknown) => void;
-	on("before_agent_start", (event) => resolvedSystemPrompt && resolvedContextPolicy ? { systemPrompt: `${rewriteSubagentPrompt(typeof event.systemPrompt === "string" ? event.systemPrompt : "", { inheritProjectContext: resolvedContextPolicy.inheritProjectContext, inheritGlobalContext: resolvedContextPolicy.inheritGlobalContext, inheritSkills: resolvedContextPolicy.inheritSkills })}\n\n<active_agent name=${JSON.stringify(resolvedContextPolicy.agent)}/>\n\n${resolvedSystemPrompt}` } : undefined);
+	on("before_agent_start", (event) => resolvedSystemPrompt && resolvedContextPolicy ? { systemPrompt: appendEngineeringPolicy(`${rewriteSubagentPrompt(typeof event.systemPrompt === "string" ? event.systemPrompt : "", { inheritProjectContext: resolvedContextPolicy.inheritProjectContext, inheritGlobalContext: resolvedContextPolicy.inheritGlobalContext, inheritSkills: resolvedContextPolicy.inheritSkills })}\n\n<active_agent name=${JSON.stringify(resolvedContextPolicy.agent)}/>\n\n${resolvedSystemPrompt}`, engineeringPolicy) } : undefined);
 	on("session_start", (_event, ctx) => {
 		context = ctx; nativeSessionId = sessionId(ctx);
 		if (!nativeSessionId) throw new Error("Pane-native Pi bridge requires a persisted native session identity.");

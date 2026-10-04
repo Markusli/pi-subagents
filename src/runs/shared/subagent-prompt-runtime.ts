@@ -14,6 +14,7 @@ import type { ResolvedToolBudget, SubagentState } from "../../shared/types.ts";
 import { INTERCOM_SESSION_IDENTITY_EVENT } from "../../shared/types.ts";
 import { resolveCurrentSessionId } from "../../shared/session-identity.ts";
 import { getAgentDir } from "../../shared/utils.ts";
+import { appendEngineeringPolicy, readEngineeringPolicy } from "../../shared/engineering-policy.ts";
 import { registerChildWatchdog } from "../../watchdog/register-child.ts";
 import type { ChildWatchdogConfig } from "../../watchdog/child-status.ts";
 import { requestWatchdogPermission, type WatchdogPermissionRequest, type WatchdogPermissionResult } from "../../watchdog/permission-arbiter.ts";
@@ -490,6 +491,7 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 	const nestedRootRunId = inheritedNestedRouteOf(config)?.rootRunId;
 	if (typeof pi.registerTool === "function") registerWaitTool(pi, waitState, config.waitTool.enabled, undefined, config.waitTool.defaultTimeoutMs, { nestedRootRunId });
 	const supervisorMetadata = childSupervisorMetadata(config);
+	let engineeringPolicy = readEngineeringPolicy();
 	let nativeSupervisorClientRegistered = false;
 	const registerNativeSupervisorClientOnce = (): void => {
 		if (nativeSupervisorClientRegistered) return;
@@ -498,6 +500,7 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 	};
 	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: unknown, ctx?: ExtensionContext) => unknown) => void;
 	onRuntimeEvent("session_start", (_event: unknown, ctx?: ExtensionContext) => {
+		engineeringPolicy = readEngineeringPolicy();
 		const sessionManager = (ctx as { sessionManager?: Parameters<typeof resolveCurrentSessionId>[0] } | undefined)?.sessionManager;
 		waitState.currentSessionId = sessionManager ? resolveCurrentSessionId(sessionManager) : null;
 		registerNativeSupervisorClientOnce();
@@ -570,6 +573,7 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 				structuredOutput: Boolean(config.structuredOutput),
 			});
 		}
+		rewritten = appendEngineeringPolicy(rewritten, engineeringPolicy);
 		if (rewritten === event.systemPrompt) return;
 		return { systemPrompt: rewritten };
 	});

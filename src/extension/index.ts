@@ -25,7 +25,7 @@ import { buildAdvertisedAgentCatalog, buildAdvertisedAgentPrompt } from "../agen
 import { clearRuntimeAgentsForPi, listRuntimeAgentConfigs, mergeRuntimeAgents } from "../agents/runtime-agent-registry.ts";
 import { registerRuntimeAgentEventListener } from "../agents/runtime-agent-events.ts";
 import { ensureAccessibleDir } from "../shared/accessible-dir.ts";
-import { appendEngineeringPolicy, readEngineeringPolicy } from "../shared/engineering-policy.ts";
+import { readEngineeringPolicy } from "../shared/engineering-policy.ts";
 import { cleanupAllArtifactDirs, cleanupOldArtifacts, getArtifactsDir } from "../shared/artifacts.ts";
 import { resolveCurrentSessionId } from "../shared/session-identity.ts";
 import { getAgentDir } from "../shared/utils.ts";
@@ -798,31 +798,24 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		await waitForAdvertisement();
-		if (!event.systemPromptOptions.selectedTools.includes("subagent")) return;
-		const sessionId = state.currentSessionId ?? resolveCurrentSessionId(ctx.sessionManager);
-<<<<<<< HEAD
-		// Structured sections let Pi append a transcript delta instead of replacing the
-		// cached system prompt. Set the section on every turn it applies: Pi rebuilds the
-		// options each turn, and an unset turn records a removal.
-		const catalog = buildAdvertisedAgentCatalog(advertisedAgents, resolveCurrentSubagentCapabilityCeiling(sessionId));
-		if (catalog) event.systemPromptOptions.sections.advertised_subagents = catalog;
-	});
-
-	registerWaitTool(pi, state, waitToolConfig.enabled, waitSubscriptionManager, waitToolConfig.defaultTimeoutMs, undefined, supervisorChannel.hasPendingRequests);
-=======
-		const advertisedPrompt = Array.isArray(selectedTools) && selectedTools.includes("subagent")
-			? buildAdvertisedAgentPrompt(advertisedAgents, resolveCurrentSubagentCapabilityCeiling(sessionId))
-			: undefined;
-		const systemPrompt = appendEngineeringPolicy(appendAdvertisedAgentPrompt(event.systemPrompt, advertisedPrompt), engineeringPolicy);
-		if (systemPrompt !== event.systemPrompt) return { systemPrompt };
+		if (event.systemPromptOptions.selectedTools.includes("subagent")) {
+			const sessionId = state.currentSessionId ?? resolveCurrentSessionId(ctx.sessionManager);
+			// Structured sections let Pi append a transcript delta instead of replacing the
+			// cached system prompt. Set the section on every turn it applies: Pi rebuilds the
+			// options each turn, and an unset turn records a removal.
+			const catalog = buildAdvertisedAgentCatalog(advertisedAgents, resolveCurrentSubagentCapabilityCeiling(sessionId));
+			if (catalog) event.systemPromptOptions.sections.advertised_subagents = catalog;
+		}
+		if (engineeringPolicy) {
+			event.systemPromptOptions.sections.engineering_policy = `# Global Engineering Policy\n\n${engineeringPolicy}`;
+		}
 	});
 
 	pi.on("session_start", () => {
 		engineeringPolicy = readEngineeringPolicy();
 	});
 
-	registerWaitTool(pi, state, waitToolConfig.enabled, waitSubscriptionManager, waitToolConfig.defaultTimeoutMs);
->>>>>>> 4d20fd30 (wip: checkpoint orchestration changes before Pi 1 upgrade)
+	registerWaitTool(pi, state, waitToolConfig.enabled, waitSubscriptionManager, waitToolConfig.defaultTimeoutMs, undefined, supervisorChannel.hasPendingRequests);
 
 	pi.on("agent_end", async (_event, ctx) => {
 		try {

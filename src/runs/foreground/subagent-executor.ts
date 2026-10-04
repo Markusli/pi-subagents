@@ -1989,6 +1989,13 @@ async function resumeAsyncRun(input: {
 		? discoveredAgents.map((agent) => applyIntercomBridgeToAgent(agent, intercomBridge))
 		: discoveredAgents;
 	const discoveredAgentConfig = discoveredAgents.find((agent) => agent.name === target.agent);
+	if (scope === "user" && discoveredAgentConfig?.source !== "user") {
+		return {
+			content: [{ type: "text", text: `Cannot resume: agent '${target.agent}' is not an active user-owned role.` }],
+			isError: true,
+			details: { mode: "management", results: [] },
+		};
+	}
 	const baseAgentConfig: AgentConfig | undefined = discoveredAgentConfig ?? (recoveryDescriptor ? {
 		name: recoveryDescriptor.agent,
 		description: "Persisted async recovery contract",

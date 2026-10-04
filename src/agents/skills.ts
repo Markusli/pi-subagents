@@ -339,6 +339,41 @@ function collectSettingsPackageSkillPaths(cwd: string, agentDir: string): SkillS
 	return results;
 }
 
+function collectCodexMarketplaceSkillPaths(agentDir: string): SkillSearchPath[] {
+	const marketplaceRoot = path.join(agentDir, "codex-marketplace");
+	const state = readJsonFileBestEffort(path.join(marketplaceRoot, "state.json"));
+	if (!state || typeof state !== "object" || Array.isArray(state)) return [];
+
+	const installations = (state as { installations?: unknown }).installations;
+	if (!Array.isArray(installations)) return [];
+
+	const results: SkillSearchPath[] = [];
+	for (const installation of installations) {
+		if (!installation || typeof installation !== "object" || Array.isArray(installation)) continue;
+		const entry = installation as {
+			enabled?: unknown;
+			installationState?: unknown;
+			pluginId?: unknown;
+			snapshot?: unknown;
+			skills?: unknown;
+		};
+		if (entry.enabled !== true || entry.installationState !== "enabled") continue;
+		if (typeof entry.pluginId !== "string" || typeof entry.snapshot !== "string" || !Array.isArray(entry.skills)) continue;
+
+		const snapshotRoot = path.resolve(marketplaceRoot, "cache", "entries", entry.snapshot);
+		const pluginSkillsRoot = path.resolve(snapshotRoot, "plugins", entry.pluginId, "skills");
+		if (!isWithinPath(pluginSkillsRoot, snapshotRoot)) continue;
+
+		for (const skillName of entry.skills) {
+			if (typeof skillName !== "string" || !skillName || skillName.includes("/") || skillName.includes("\\")) continue;
+			const skillPath = path.resolve(pluginSkillsRoot, skillName);
+			if (!isWithinPath(skillPath, pluginSkillsRoot)) continue;
+			results.push({ path: skillPath, source: "user-settings" });
+		}
+	}
+	return results;
+}
+
 function buildSkillPaths(cwd: string, agentDir: string): SkillSearchPath[] {
 	const projectConfigDir = getProjectConfigDir(cwd);
 	const skillPaths: SkillSearchPath[] = [
@@ -348,6 +383,7 @@ function buildSkillPaths(cwd: string, agentDir: string): SkillSearchPath[] {
 		{ path: path.join(os.homedir(), ".agents", "skills"), source: "user" },
 		...collectInstalledPackageSkillPaths(cwd, agentDir),
 		...collectSettingsPackageSkillPaths(cwd, agentDir),
+		...collectCodexMarketplaceSkillPaths(agentDir),
 		...extractSkillPathsFromPackageRoot(cwd, "project-package"),
 		...collectSettingsSkillPaths(cwd, agentDir),
 	];

@@ -285,6 +285,8 @@ The catalog is sent as Pi's `advertised_subagents` prompt section. When it chang
 
 Subagents are narrow by default. Custom agents start with a clean system prompt and only the context you intentionally give them. They do not automatically inherit Pi's whole base prompt, project instruction files, or discovered skills catalog.
 
+`~/.pi/agent/ENGINEERING.md` is a separate exception for compact engineering policy. When present, pi-subagents appends it to the main Pi prompt and to every child prompt, independently of `inheritProjectContext` and `inheritGlobalContext`. This is intended for small cross-project invariants that should apply before skill selection, not operator/delegation configuration. The main session refreshes it on session start/reload, and newly assembled child prompts read the current file. Keep project-specific rules in repository context instead.
+
 Use these fields when an agent should see more:
 
 | Field | Effect |

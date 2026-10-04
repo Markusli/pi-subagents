@@ -1759,7 +1759,7 @@ async function runSyncCompletionInner(
 		agent.skillPath,
 		agent.filePath ? path.dirname(agent.filePath) : skillCwd,
 	);
-	if (skillNames.some((skill) => skill.trim() === "pi-subagents") && missingSkills.includes("pi-subagents")) {
+	if (missingSkills.length > 0) {
 		return redactResultPrompt(withRunContext({
 			index: options.index ?? 0,
 			agent: agentName,
@@ -1767,7 +1767,7 @@ async function runSyncCompletionInner(
 			exitCode: 1,
 			messages: [],
 			usage: emptyUsage(),
-			error: "Skills not found: pi-subagents",
+			error: `Skills not found: ${missingSkills.join(", ")}`,
 		}, options.context));
 	}
 	const systemPrompt = buildEffectiveSystemPrompt({ agent, resolvedSkills, cwd: skillCwd, ...(options.outputPath ? { outputPath: options.outputPath } : {}) });
@@ -1892,7 +1892,7 @@ async function runSyncCompletionInner(
 			systemPrompt,
 			acceptancePrompt,
 			resolvedSkillNames: resolvedSkills.length > 0 ? resolvedSkills.map((skill) => skill.name) : undefined,
-			skillsWarning: missingSkills.length > 0 ? `Skills not found: ${missingSkills.join(", ")}` : undefined,
+			skillsWarning: undefined,
 			jsonlPath,
 			artifactPaths: artifactPathsResult,
 			transcriptWriter,

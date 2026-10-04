@@ -3395,23 +3395,48 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		assert.equal(result.skillsWarning, undefined);
 	});
 
-	it("fails foreground runs on explicit unavailable pi-subagents skill requests without spawning", async () => {
+	it("fails foreground runs on any explicit unavailable skill request without spawning", async () => {
 		const agents = [makeAgent("worker")];
 
-		const result = await runSync(tempDir, agents, "worker", "Task", { skills: ["pi-subagents"] });
+		const result = await runSync(tempDir, agents, "worker", "Task", { skills: ["missing-domain-skill"] });
 
 		assert.equal(result.exitCode, 1);
-		assert.equal(result.error, "Skills not found: pi-subagents");
+		assert.equal(result.error, "Skills not found: missing-domain-skill");
 		assert.equal(mockPi.callCount(), 0);
 	});
 
-	it("fails foreground runs when an agent default requests pi-subagents skill", async () => {
-		const agents = [makeAgent("worker", { skills: ["pi-subagents"] })];
+	it("does not infer skill bindings from task prose", async () => {
+		writePackageSkill(tempDir, "named-but-unbound-skill");
+		mockPi.onCall({ output: "Done" });
+		const agents = [makeAgent("worker")];
+
+		const result = await runSync(tempDir, agents, "worker", "Discuss named-but-unbound-skill while doing this work", {});
+
+		assert.equal(result.exitCode, 0);
+		assert.equal(result.error, undefined);
+		assert.deepEqual(result.skills ?? [], []);
+		assert.equal(mockPi.callCount(), 1);
+	});
+
+	it("allows and injects a named installed skill when it is explicitly bound", async () => {
+		writePackageSkill(tempDir, "named-bound-skill");
+		mockPi.onCall({ output: "Done" });
+		const agents = [makeAgent("worker")];
+
+		const result = await runSync(tempDir, agents, "worker", "Use named-bound-skill to do this work", { skills: ["named-bound-skill"] });
+
+		assert.equal(result.exitCode, 0);
+		assert.deepEqual(result.skills, ["named-bound-skill"]);
+		assert.match(readCall().systemPrompts.map((record) => record.text ?? "").join("\n"), /named-bound-skill/);
+	});
+
+	it("fails foreground runs when an agent default requests an unavailable skill", async () => {
+		const agents = [makeAgent("worker", { skills: ["missing-default-skill"] })];
 
 		const result = await runSync(tempDir, agents, "worker", "Task", {});
 
 		assert.equal(result.exitCode, 1);
-		assert.equal(result.error, "Skills not found: pi-subagents");
+		assert.equal(result.error, "Skills not found: missing-default-skill");
 		assert.equal(mockPi.callCount(), 0);
 	});
 

@@ -204,7 +204,7 @@ const SubagentParamProperties = {
 	timezone: Type.Optional(Type.String({ description: "IANA/UTC." })),
 	overlap: Type.Optional(Type.String({ enum: ["skip"] })),
 	catchUp: Type.Optional(Type.String({ enum: ["none", "latest"], description: "Missed; default latest." })),
-	missionId: Type.Optional(Type.String({ description: "Existing mission to attach to a workflow or schedule.create; read guide missions for lifecycle and retention." })),
+	missionId: Type.Optional(Type.String({ description: "Existing mission; read guide missions." })),
 	mission: Type.Optional(Type.Unsafe({ ...MissionLaunchOverride, description: "false disables. Object: exactly one non-empty title or summary; goal only true, requires budget.tokens; autoDrive continues idle goals." })),
 	missionUpdate: Type.Optional(Type.Unsafe({ ...MissionUpdateOverride, description: "Mission patch; read guide missions." })),
 	missionStatus: Type.Optional(Type.String()),

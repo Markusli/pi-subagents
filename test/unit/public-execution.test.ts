@@ -126,6 +126,24 @@ describe("public subagent execution normalization", () => {
 		}
 	});
 
+	it("rejects caller-controlled output paths for evidence qualification", () => {
+		for (const workflow of ["evidence-qualification", " evidence-qualification "] as const) {
+			for (const output of [true, false, "result.md", "/tmp/result.md"] as const) {
+				const result = normalizePublicSubagentExecution({
+					workflow,
+					args: { contract: "Fixed", claims: [{ id: "a", claim: "A" }] },
+					output,
+				});
+				assert.equal(result.ok, false, `${workflow}:${String(output)}`);
+				if (!result.ok) assert.match(result.error, /does not accept a caller-controlled output path/);
+			}
+		}
+		assert.equal(normalizePublicSubagentExecution({
+			workflow: "evidence-qualification",
+			args: { contract: "Fixed", claims: [{ id: "a", claim: "A" }] },
+		}).ok, true);
+	});
+
 	it("rejects bare arguments and arguments on direct child launches", () => {
 		for (const params of [{ args: {} }, { agent: "worker", task: "work", args: {} }] as const) {
 			const result = normalizePublicSubagentExecution(params);

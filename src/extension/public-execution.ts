@@ -109,6 +109,9 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
 		return { ok: false, error: "workflow must be true (the ```js workflow block in this reply), a script path containing '/', or a named workflow resource.", mode: "workflow" };
 	}
 	const hasNamedWorkflow = typeof workflow === "string" && !isWorkflowScriptPath(workflow);
+	if (typeof workflow === "string" && workflow.trim() === "evidence-qualification" && params.output !== undefined) {
+		return { ok: false, error: "workflow 'evidence-qualification' does not accept a caller-controlled output path; use the workflow result or its managed artifacts.", mode: "workflow" };
+	}
 	// workflowScript is the internal script carrier; model tool calls cannot set it.
 	if (workflow !== undefined && params.workflowScript !== undefined) {
 		return { ok: false, error: "workflow cannot be combined with an internal workflowScript.", mode: "workflow" };

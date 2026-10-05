@@ -61,12 +61,13 @@ The extension ships with agents you can use immediately:
 | `scout` | Fast local codebase recon: relevant files, entry points, data flow, risks. |
 | `researcher` | Web/docs research with sources and a concise research brief. Requires [pi-web-access in the child](docs/agents.md#web-research-prerequisites). |
 | `evidence-auditor` | Independently checks whether important research claims are supported by their sources. Requires [pi-web-access in the child](docs/agents.md#web-research-prerequisites). |
+| `verifier` | Qualifies fixed local/executable claims with independent probes and falsification checks, without repairing the subject. |
 | `worker` | Implementation work. Edits files, validates, escalates unapproved decisions instead of guessing. |
 | `reviewer` | Code review and small fixes against the task/plan, tests, edge cases, and simplicity. |
 | `oracle` | A second opinion before acting. Challenges assumptions without editing. |
 | `delegate` | A lightweight general delegate that behaves close to the parent session. |
 
-Rule of thumb: `scout` before you understand the code, `researcher` before you trust external facts, `evidence-auditor` before you rely on important research, `worker` to implement, `reviewer` to check, and `oracle` when the decision itself feels risky.
+Rule of thumb: `scout` before you understand the code, `researcher` before you trust external facts, `evidence-auditor` before you rely on cited research, `verifier` before you qualify executable/local evidence, `worker` to implement, `reviewer` to check a change, and `oracle` when the decision itself feels risky.
 
 ## Common workflows
 
@@ -78,6 +79,7 @@ The package includes `/council` and `council-mode`, plus documented model-based
 | Get a second opinion | "Ask oracle to review this plan and challenge assumptions." |
 | Solve a hard problem | "Use oracle to investigate this bug before we edit." |
 | Review a diff | "Use reviewer to review this diff." |
+| Qualify experimental evidence | "Use evidence-qualification to verify these fixed claims before I rely on the result." |
 | Run parallel reviewers | "Run reviewers for correctness, tests, and cleanup." |
 | Debate a material decision | "Use `/council` with model-based advisors to compare this decision." |
 | Implement then review | "Implement this, then review it." |

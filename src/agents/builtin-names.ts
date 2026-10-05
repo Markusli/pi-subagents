@@ -12,5 +12,6 @@ export const BUILTIN_AGENT_NAMES = [
 	"researcher",
 	"reviewer",
 	"scout",
+	"verifier",
 	"worker",
 ] as const;

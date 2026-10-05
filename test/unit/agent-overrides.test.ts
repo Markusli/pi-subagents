@@ -171,6 +171,13 @@ describe("builtin agent overrides", () => {
 		const builtins = discoverAgentsAll(tempProject).builtin;
 		assert.equal(builtins.find((agent) => agent.name === "researcher")?.tools, undefined);
 		assert.deepEqual(builtins.find((agent) => agent.name === "reviewer")?.tools, ["read", "grep", "find", "ls", "watchdog_diff", "contact_supervisor"]);
+		const verifier = builtins.find((agent) => agent.name === "verifier");
+		assert.deepEqual(verifier?.tools, ["read", "grep", "find", "ls", "bash"]);
+		assert.equal(verifier?.thinking, "high");
+		assert.equal(verifier?.defaultContext, "fresh");
+		assert.match(verifier?.systemPrompt ?? "", /fixed/i);
+		assert.match(verifier?.systemPrompt ?? "", /falsification/i);
+		assert.match(verifier?.systemPrompt ?? "", /Never repair/i);
 		assert.deepEqual(builtins.find((agent) => agent.name === "worker")?.tools, ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"]);
 		assert.deepEqual(builtins.find((agent) => agent.name === "scout")?.tools, ["read", "grep", "find", "ls", "bash", "write", "contact_supervisor"]);
 	});

@@ -41,12 +41,15 @@ Builtins load at the lowest priority, so a user or project agent with the same n
 | `scout` | Fast local codebase recon: relevant files, entry points, data flow, risks, and where another agent should start. |
 | `researcher` | Web/docs research with sources: official docs, specs, benchmarks, recent changes, and a concise research brief. |
 | `evidence-auditor` | Independent evidence review of important claims in an existing research brief. |
+| `verifier` | Independent qualification of fixed executable/local claims using direct, negative, mutation, or metamorphic probes. It does not repair the subject. |
 | `worker` | Implementation work, including approved oracle handoffs. It edits files, validates, and escalates unapproved decisions instead of guessing. |
 | `reviewer` | Code review and small fixes. It checks the implementation against the task/plan, tests, edge cases, and simplicity. |
 | `oracle` | A second opinion before acting. It challenges assumptions, catches drift, and recommends the safest next move without editing. |
 | `delegate` | A lightweight general delegate when you want a child agent that behaves close to the parent session. |
 
-Rule of thumb: `scout` before you understand the code, `researcher` before you trust external facts, `evidence-auditor` before you rely on important research, `worker` to implement, `reviewer` to check, and `oracle` when the decision itself feels risky.
+Rule of thumb: `scout` before you understand the code, `researcher` before you trust external facts, `evidence-auditor` before you rely on cited research, `verifier` before you qualify executable/local evidence, `worker` to implement, `reviewer` to check a change, and `oracle` when the decision itself feels risky.
+
+`reviewer`, `evidence-auditor`, and `verifier` intentionally answer different questions. `reviewer` checks a change or plan for defects. `evidence-auditor` checks whether external sources support research claims. `verifier` receives a fixed local qualification contract and tries to prove or falsify each claim with executable evidence. A passing existing test is evidence for the verifier to challenge, not an oracle. The builtin verifier has shell execution but no edit/write tools; use the `evidence-qualification` workflow when source integrity matters because it forces a fresh verifier into a managed disposable worktree, rejects the result if the original checkout's HEAD or working-tree state changes, and derives the overall verdict from complete claim coverage. Arbitrary external artifact paths are not protected by that checkout-integrity check; stage copies or use read-only storage when they need a hard mutation boundary.
 
 `oracle` is an advisory reviewer that critiques direction and proposes an execution prompt without editing files. `advisor` is the same bundled role under the Claude Code-compatible name.
 

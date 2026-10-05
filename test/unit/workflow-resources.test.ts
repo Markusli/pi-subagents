@@ -254,6 +254,146 @@ describe("named workflow resources", () => {
 		]) assert.equal(resolveWorkflowResource("reviewed-implementation", args).ok, false);
 	});
 
+	it("qualifies fixed evidence claims with one fresh isolated verifier", async () => {
+		const resolved = resolveWorkflowResource("evidence-qualification", {
+			contract: "The scorer must preserve key identity and valid uncertainty.",
+			claims: [
+				{ id: "keys", claim: "Output keys preserve the input case identity." },
+				{ id: "intervals", claim: "Bootstrap intervals represent non-degenerate uncertainty." },
+			],
+			skill: "research-score-qualification",
+		});
+		assert.equal(resolved.ok, true);
+		if (!resolved.ok) return;
+		const launches: Array<{ key: string; params: Record<string, unknown> }> = [];
+		const hostCalls: Array<{ key: string; command: string }> = [];
+		const execution = await runWorkflowScript({
+			script: resolved.resource.script,
+			async host(key, params) {
+				hostCalls.push({ key, command: params.command });
+				return { key, kind: "command", ok: true, state: "passed", exitCode: 0, stdout: "abc123\n", stderr: "", outputPath: "source-state.log", durationMs: 1 };
+			},
+			async launch(key, params) {
+				launches.push({ key, params });
+				return {
+					key,
+					ok: true,
+					runId: "verifier-1",
+					output: "qualified",
+					structuredOutput: {
+						findings: [
+							{ id: "keys", status: "verified", evidence: ["independent shuffled-key probe passed"] },
+							{ id: "intervals", status: "verified", evidence: ["collapsed-interval mutant was rejected"] },
+						],
+						residualRisks: [],
+					},
+					artifactPaths: [],
+				};
+			},
+			async status(key) { return { key, ok: true, output: "complete", artifactPaths: [] }; },
+		});
+		assert.deepEqual(launches.map(({ key }) => key), ["verifier"]);
+		assert.equal(hostCalls.length, 2);
+		assert.deepEqual(hostCalls.map(({ key }) => key), ["source-state-before", "source-state-after"]);
+		assert.ok(hostCalls.every(({ command }) => command.includes("git status --porcelain")));
+		assert.equal(launches[0]?.params.agent, "verifier");
+		assert.equal(launches[0]?.params.context, "fresh");
+		assert.equal(launches[0]?.params.worktree, true);
+		assert.equal(launches[0]?.params.acceptance, false);
+		assert.equal(launches[0]?.params.skill, "research-score-qualification");
+		assert.match(String(launches[0]?.params.task), /fixed qualification contract/i);
+		assert.match(String(launches[0]?.params.task), /falsification probes/i);
+		assert.deepEqual(execution.value, {
+			verdict: "qualified",
+			findings: [
+				{ id: "keys", status: "verified", evidence: ["independent shuffled-key probe passed"] },
+				{ id: "intervals", status: "verified", evidence: ["collapsed-interval mutant was rejected"] },
+			],
+			residualRisks: [],
+			verifierRunId: "verifier-1",
+		});
+		const consumed = consumeWorkflowResourcePermit(resolved.resource.permit, resolved.resource.script);
+		assert.equal(typeof consumed, "object");
+		assert.equal(authorizeWorkflowResourceHost(resolved.resource.permit, "source-state-before", hostCalls[0]!.command), undefined);
+		assert.equal(authorizeWorkflowResourceHost(resolved.resource.permit, "source-state-after", hostCalls[1]!.command), undefined);
+		assert.match(authorizeWorkflowResourceHost(resolved.resource.permit, "ci", "npm test") ?? "", /not allowed/);
+	});
+
+	it("fails evidence qualification closed on non-verified or incomplete claim results", async () => {
+		const args = {
+			contract: "Fixed contract",
+			claims: [{ id: "a", claim: "A" }, { id: "b", claim: "B" }],
+		};
+		for (const [label, structuredOutput, expected] of [
+			["contradicted", { findings: [{ id: "a", status: "verified", evidence: ["a"] }, { id: "b", status: "contradicted", evidence: ["b failed"] }], residualRisks: [] }, "not-qualified"],
+			["unverified", { findings: [{ id: "a", status: "verified", evidence: ["a"] }, { id: "b", status: "unverified", evidence: ["insufficient oracle"] }], residualRisks: [] }, "not-qualified"],
+		] as const) {
+			const resolved = resolveWorkflowResource("evidence-qualification", args);
+			assert.equal(resolved.ok, true, label);
+			if (!resolved.ok) continue;
+			const execution = await runWorkflowScript({
+				script: resolved.resource.script,
+				async host(key) { return { key, kind: "command", ok: true, state: "passed", exitCode: 0, stdout: "same\n", stderr: "", outputPath: "source-state.log", durationMs: 1 }; },
+				async launch(key) { return { key, ok: true, runId: "v", output: label, structuredOutput, artifactPaths: [] }; },
+				async status(key) { return { key, ok: true, output: "complete", artifactPaths: [] }; },
+			});
+			assert.equal((execution.value as { verdict?: string }).verdict, expected, label);
+		}
+
+		for (const [label, structuredOutput] of [
+			["missing", { findings: [{ id: "a", status: "verified", evidence: ["a"] }], residualRisks: [] }],
+			["duplicate", { findings: [{ id: "a", status: "verified", evidence: ["a"] }, { id: "a", status: "verified", evidence: ["again"] }], residualRisks: [] }],
+			["extra", { findings: [{ id: "a", status: "verified", evidence: ["a"] }, { id: "x", status: "verified", evidence: ["x"] }], residualRisks: [] }],
+			["empty-evidence", { findings: [{ id: "a", status: "verified", evidence: [] }, { id: "b", status: "verified", evidence: ["b"] }], residualRisks: [] }],
+		] as const) {
+			const resolved = resolveWorkflowResource("evidence-qualification", args);
+			assert.equal(resolved.ok, true, label);
+			if (!resolved.ok) continue;
+			await assert.rejects(runWorkflowScript({
+				script: resolved.resource.script,
+				async host(key) { return { key, kind: "command", ok: true, state: "passed", exitCode: 0, stdout: "same\n", stderr: "", outputPath: "source-state.log", durationMs: 1 }; },
+				async launch(key) { return { key, ok: true, runId: "v", output: label, structuredOutput, artifactPaths: [] }; },
+				async status(key) { return { key, ok: true, output: "complete", artifactPaths: [] }; },
+			}), /Verifier/);
+		}
+	});
+
+	it("rejects qualification when the original checkout changes during verification", async () => {
+		const resolved = resolveWorkflowResource("evidence-qualification", {
+			contract: "Fixed contract",
+			claims: [{ id: "a", claim: "A" }],
+		});
+		assert.equal(resolved.ok, true);
+		if (!resolved.ok) return;
+		let hostCall = 0;
+		await assert.rejects(runWorkflowScript({
+			script: resolved.resource.script,
+			async host(key) {
+				hostCall += 1;
+				return { key, kind: "command", ok: true, state: "passed", exitCode: 0, stdout: hostCall === 1 ? "before\n" : "after\n", stderr: "", outputPath: "source-state.log", durationMs: 1 };
+			},
+			async launch(key) {
+				return { key, ok: true, runId: "v", output: "verified", structuredOutput: { findings: [{ id: "a", status: "verified", evidence: ["probe"] }], residualRisks: [] }, artifactPaths: [] };
+			},
+			async status(key) { return { key, ok: true, output: "complete", artifactPaths: [] }; },
+		}), /Source checkout changed during evidence qualification/);
+		assert.equal(hostCall, 2);
+	});
+
+	it("bounds evidence qualification arguments", () => {
+		for (const args of [
+			{},
+			{ contract: "", claims: [{ id: "a", claim: "A" }] },
+			{ contract: "C", claims: [] },
+			{ contract: "C", claims: [{ id: "", claim: "A" }] },
+			{ contract: "C", claims: [{ id: "a", claim: "" }] },
+			{ contract: "C", claims: [{ id: "a", claim: "A" }, { id: "a", claim: "B" }] },
+			{ contract: "C", claims: [{ id: "a", claim: "A", extra: true }] },
+			{ contract: "C", claims: [{ id: "a", claim: "A" }], skill: "" },
+			{ contract: "C", claims: [{ id: "a", claim: "A" }], extra: true },
+		]) assert.equal(resolveWorkflowResource("evidence-qualification", args).ok, false);
+	});
+
 	it("does not authorize raw equivalent scripts or unconsumed/forged permits", () => {
 		const forged = { __workflowResourcePermit: Symbol("forged") } as never;
 		assert.equal(authorizeWorkflowResourceHost(forged, "ci", "npm test"), "Workflow resource authority is unavailable.");

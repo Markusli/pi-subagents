@@ -220,7 +220,111 @@ throw new Error("Reviewed implementation did not settle.");`;
 	return { script };
 }
 
+function resolveEvidenceQualification(args: Readonly<Record<string, unknown>>): ReturnType<WorkflowResourceDefinition["resolve"]> {
+	const allowed = new Set(["contract", "claims", "skill"]);
+	const unsupported = Object.keys(args).filter((key) => !allowed.has(key));
+	if (unsupported.length > 0) return { error: `workflow 'evidence-qualification' args contain unsupported fields: ${unsupported.join(", ")}.` };
+	const contract = args.contract;
+	if (typeof contract !== "string" || !contract.trim()) return { error: "workflow 'evidence-qualification' requires a non-empty string args.contract." };
+	const claims = args.claims;
+	if (!Array.isArray(claims) || claims.length === 0) return { error: "workflow 'evidence-qualification' requires a non-empty array args.claims." };
+	const ids: string[] = [];
+	const normalizedClaims: Array<{ id: string; claim: string }> = [];
+	for (const [index, entry] of claims.entries()) {
+		if (!isPlainRecord(entry) || Object.keys(entry).some((key) => key !== "id" && key !== "claim")) {
+			return { error: `workflow 'evidence-qualification' args.claims[${index}] must be a plain object with only id and claim.` };
+		}
+		const id = entry.id;
+		const claim = entry.claim;
+		if (typeof id !== "string" || !id.trim()) return { error: `workflow 'evidence-qualification' args.claims[${index}].id must be a non-empty string.` };
+		if (typeof claim !== "string" || !claim.trim()) return { error: `workflow 'evidence-qualification' args.claims[${index}].claim must be a non-empty string.` };
+		const trimmedId = id.trim();
+		if (ids.includes(trimmedId)) return { error: `workflow 'evidence-qualification' args.claims contains duplicate id '${trimmedId}'.` };
+		ids.push(trimmedId);
+		normalizedClaims.push({ id: trimmedId, claim: claim.trim() });
+	}
+	const skill = args.skill;
+	if (skill !== undefined && (typeof skill !== "string" || !skill.trim())) return { error: "workflow 'evidence-qualification' args.skill must be a non-empty string when provided." };
+	const outputSchema = {
+		type: "object",
+		properties: {
+			findings: {
+				type: "array",
+				minItems: ids.length,
+				maxItems: ids.length,
+				items: {
+					type: "object",
+					properties: {
+						id: { type: "string" },
+						status: { type: "string", enum: ["verified", "contradicted", "unverified"] },
+						evidence: { type: "array", items: { type: "string" }, minItems: 1 },
+					},
+					required: ["id", "status", "evidence"],
+					additionalProperties: false,
+				},
+			},
+			residualRisks: { type: "array", items: { type: "string" } },
+		},
+		required: ["findings", "residualRisks"],
+		additionalProperties: false,
+	};
+	const skillParam = typeof skill === "string" ? `,\n  skill: ${JSON.stringify(skill.trim())}` : "";
+	const sourceStateCommand = 'git rev-parse HEAD && git status --porcelain -- ":/" ":(exclude).pi/subagents"';
+	const task = [
+		"Qualify every claim in the supplied fixed qualification contract using executable or local evidence.",
+		"For each claim, decompose it, run independent positive checks plus targeted negative and falsification probes, and prefer independent formulations or synthetic cases. Treat existing tests as evidence to challenge, not an oracle. Use mutation or metamorphic probes when useful. Never repair or modify the subject source or evidence; use disposable temporary paths for probes. Report contradicted or unverified instead of guessing. Do not contact a supervisor.",
+		"Return exactly one finding per supplied claim with id, a status of verified, contradicted, or unverified, and non-empty evidence strings, plus residualRisks.",
+		"",
+		"Qualification contract:",
+		contract.trim(),
+		"",
+		"Claims:",
+		JSON.stringify(normalizedClaims),
+	].join("\n");
+	const script = `
+const sourceBefore = await runs.host("source-state-before", { kind: "command", command: ${JSON.stringify(sourceStateCommand)}, timeoutMs: 10000 });
+if (!sourceBefore.ok || sourceBefore.state !== "passed") throw new Error("Unable to capture source checkout state before verification.");
+const verifier = await runs.run("verifier", {
+  agent: "verifier",
+  context: "fresh",
+  worktree: true,
+  acceptance: false,
+  outputSchema: ${JSON.stringify(outputSchema)},
+  task: ${JSON.stringify(task)}${skillParam}
+});
+const sourceAfter = await runs.host("source-state-after", { kind: "command", command: ${JSON.stringify(sourceStateCommand)}, timeoutMs: 10000 });
+if (!sourceAfter.ok || sourceAfter.state !== "passed") throw new Error("Unable to capture source checkout state after verification.");
+if (sourceAfter.stdout !== sourceBefore.stdout) throw new Error("Source checkout changed during evidence qualification; qualification rejected.");
+if (!verifier.ok || verifier.structuredOutput === undefined || verifier.structuredOutput === null || typeof verifier.structuredOutput !== "object" || Array.isArray(verifier.structuredOutput)) {
+  throw new Error("Verifier did not return structured qualification output.");
+}
+const expectedIds = ${JSON.stringify(ids)};
+const findings = verifier.structuredOutput.findings;
+const residualRisks = verifier.structuredOutput.residualRisks;
+if (!Array.isArray(findings)) throw new Error("Verifier structured output is missing a findings array.");
+if (!Array.isArray(residualRisks) || residualRisks.some((risk) => typeof risk !== "string")) throw new Error("Verifier structured output has an invalid residualRisks array.");
+const byId = new Map();
+for (const finding of findings) {
+  if (!finding || typeof finding !== "object" || Array.isArray(finding)) throw new Error("Verifier finding is not an object.");
+  if (typeof finding.id !== "string" || !expectedIds.includes(finding.id)) throw new Error("Verifier finding has an unexpected or missing id: " + String(finding.id));
+  if (byId.has(finding.id)) throw new Error("Verifier returned duplicate findings for id: " + finding.id);
+  if (finding.status !== "verified" && finding.status !== "contradicted" && finding.status !== "unverified") throw new Error("Verifier finding has an invalid status for id: " + finding.id);
+  if (!Array.isArray(finding.evidence) || finding.evidence.length === 0 || finding.evidence.some((entry) => typeof entry !== "string" || !entry.trim())) throw new Error("Verifier finding has no evidence for id: " + finding.id);
+  byId.set(finding.id, { id: finding.id, status: finding.status, evidence: finding.evidence });
+}
+if (byId.size !== expectedIds.length) throw new Error("Verifier findings do not cover every claim exactly once.");
+const orderedFindings = expectedIds.map((id) => byId.get(id));
+const verdict = orderedFindings.every((finding) => finding.status === "verified") ? "qualified" : "not-qualified";
+return { verdict, findings: orderedFindings, residualRisks, verifierRunId: verifier.runId };
+`;
+	return { script, hostCommands: [
+		{ key: "source-state-before", command: sourceStateCommand },
+		{ key: "source-state-after", command: sourceStateCommand },
+	] };
+}
+
 const WORKFLOW_RESOURCES: readonly WorkflowResourceDefinition[] = [
+	{ name: "evidence-qualification", version: 1, resolve: resolveEvidenceQualification },
 	{ name: "review", version: 1, resolve: resolveReview },
 	{ name: "reviewed-implementation", version: 1, resolve: resolveReviewedImplementation },
 	{ name: "run-ci", version: 1, resolve: resolveRunCi },

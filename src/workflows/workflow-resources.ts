@@ -202,7 +202,7 @@ for (let round = 1; round <= ${reviewRounds}; round += 1) {
   const review = await runs.run("review-" + round, {
     agent: "reviewer",
     acceptance: false,
-    task: "Fresh independent review of the current working-tree diff. Inspect the actual changed files and relevant contracts. Return verdict=clean only when there are no concrete actionable correctness, regression, test, or unnecessary-complexity findings caused or exposed by this diff. Return verdict=blockers with concise findings otherwise. Do not edit files or delegate.",
+    task: "Fresh independent review of the current working-tree diff against the operator-approved implementation contract below. The contract's explicit constraints are authoritative: do not require a prohibited change merely to improve evidence. Use the current writer evidence when judging whether a contract is already proven; if more evidence is materially required, request the smallest in-scope verification that can establish it.\\n\\nImplementation contract:\\n" + ${JSON.stringify(task.trim())} + "\\n\\nCurrent writer evidence:\\n" + (writer.output || "<no writer evidence>") + "\\n\\nInspect the actual changed files and relevant contracts. Return verdict=clean only when there are no concrete actionable correctness, regression, test, or unnecessary-complexity findings caused or exposed by this diff. Return verdict=blockers with concise in-scope findings otherwise. Do not edit files or delegate.",
     outputSchema: ${JSON.stringify(reviewSchema)}
   });
   if (review.structuredOutput.verdict === "clean") {
@@ -213,7 +213,7 @@ for (let round = 1; round <= ${reviewRounds}; round += 1) {
   if (!writer.runId) throw new Error("Implementation worker did not return a resumable run id for repair.");
   writer = await runs.run("repair-" + round, {
     resume: writer.runId,
-    task: "Address only these independent review findings, preserve the approved scope, and return when the fixes are complete:\\n" + review.structuredOutput.findings.join("\\n")
+    task: "Address only these independent review findings while preserving every explicit constraint in the original implementation contract. Do not widen scope or violate a prohibited-change constraint. When a finding is fundamentally an evidence gap, prefer the smallest in-scope non-mutating verification that proves the existing behavior. Return the concrete fixes and/or verification evidence for the next fresh reviewer.\\n\\nOriginal implementation contract:\\n" + ${JSON.stringify(task.trim())} + "\\n\\nReview findings:\\n" + review.structuredOutput.findings.join("\\n")
   });
 }
 throw new Error("Reviewed implementation did not settle.");`;

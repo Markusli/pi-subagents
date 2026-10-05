@@ -84,7 +84,7 @@ import { registerOrchestrationMode } from "./orchestration-mode.ts";
 import { registerClefDecisions } from "./clef-decisions.ts";
 import { finalizeToolResult } from "./tool-result.ts";
 import { removedModelWorkflowFieldError } from "./public-execution.ts";
-import { collectGoalContinuationNotices } from "../missions/goal-driver.ts";
+import { claimGoalAutoDrive, collectGoalContinuationNotices } from "../missions/goal-driver.ts";
 import { restoreForegroundRunHistory } from "../runs/foreground/foreground-history.ts";
 import { resolveMissionStoreLocation } from "../missions/store.ts";
 import { listRetainedChildren } from "../runs/background/retained-children.ts";
@@ -426,6 +426,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		}, { placement: fleetViewPlacement, onWorkflowCoverageChange: setInlineWorkflowCoverage })
 		: undefined;
 	let goalTurnId = 0;
+	const autoDrivenGoalNotices = new Map<string, string>();
 	let releaseHostSessionLiveness = () => {};
 	const scheduledStoreRoot = config.scheduledRuns?.storeRoot === undefined ? undefined : resolveScheduledStoreRoot(config.scheduledRuns.storeRoot);
 	const scheduledRunManager = createScheduledRunManager({
@@ -851,11 +852,12 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 					const location = resolveMissionStoreLocation({ projectRoot: state.baseCwd, ...(config.missions ? { config: config.missions } : {}) });
 					const retainedChildren = listRetainedChildren(DIRS.async, ownerSessionId);
 					for (const notice of collectGoalContinuationNotices({ location, ownerSessionId, retainedChildren, turnId: goalTurnId })) {
+						const autoDrive = claimGoalAutoDrive(notice, autoDrivenGoalNotices);
 						handleSubagentControlNotice({
 							pi: parentWake,
 							state,
 							visibleControlNotices: new Set(),
-							details: { source: "goal", event: notice.event, noticeText: notice.message },
+							details: { source: "goal", event: notice.event, noticeText: notice.message, autoDrive },
 						});
 					}
 				} catch (error) {
@@ -980,6 +982,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		state.widgetsSuspended = false;
 		state.baseCwd = ctx.cwd;
 		goalTurnId = 0;
+		autoDrivenGoalNotices.clear();
 		const previousRuntimeSessionId = state.currentSessionId;
 		resultDeliveryOwnership.claimPredecessor(previousSessionFile, previousRuntimeSessionId);
 		state.currentSessionId = resolveCurrentSessionId(ctx.sessionManager);

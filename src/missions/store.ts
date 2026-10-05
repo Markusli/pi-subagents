@@ -80,7 +80,8 @@ function nonNegativeTokenCount(value: unknown, label: string): number {
 function parseGoal(value: unknown, label: string): MissionGoal {
 	const input = asObject(value, label);
 	if (input.status !== "active" && input.status !== "paused" && input.status !== "budget-exhausted") throw new Error(`${label}.status is invalid`);
-	return { status: input.status };
+	if (input.autoDrive !== undefined && typeof input.autoDrive !== "boolean") throw new Error(`${label}.autoDrive must be a boolean`);
+	return { status: input.status, ...(input.autoDrive === true ? { autoDrive: true } : {}) };
 }
 
 function parseBudget(value: unknown, label: string): MissionTokenBudget {
@@ -370,7 +371,7 @@ export function createMission(location: MissionStoreLocation, input: MissionCrea
 		id: randomUUID(),
 		title: requiredString(input.title, "mission.title").trim(),
 		objective: requiredString(input.objective, "mission.objective").trim(),
-		...(input.goal === true ? { goal: { status: "active" as const } } : {}),
+		...(input.goal === true ? { goal: { status: "active" as const, ...(input.autoDrive === true ? { autoDrive: true } : {}) } } : {}),
 		...(input.budget ? { budget: parseBudget(input.budget, "mission.budget") } : {}),
 		...(input.goal === true ? { usage: { tokens: 0 } } : {}),
 		status: input.status ?? "planned",
@@ -386,6 +387,7 @@ export function createMission(location: MissionStoreLocation, input: MissionCrea
 		...(input.labels ? { labels: stringArray(input.labels, "mission.labels") } : {}),
 	};
 	if (input.goal === true && !input.budget) throw new Error("mission.budget is required when mission.goal is true");
+	if (input.autoDrive === true && input.goal !== true) throw new Error("mission.goal must be true when mission.autoDrive is enabled");
 	const created = writeMission(location, record);
 	pruneTerminalMissions(location, retainTerminal);
 	return created;
@@ -510,13 +512,21 @@ export function updateMission(location: MissionStoreLocation, missionId: string,
 	const usage = update.usage !== undefined
 		? parseUsage(update.usage, "mission.update.usage")
 		: { tokens: runs.reduce((total, run) => total + (run.usage?.tokens ?? 0), 0) };
-	let goal = update.goal === false ? undefined : update.goal !== undefined ? parseGoal(update.goal, "mission.update.goal") : current.goal;
+	let goal = update.goal === false
+		? undefined
+		: update.goal !== undefined
+			? { ...current.goal, ...parseGoal(update.goal, "mission.update.goal") }
+			: current.goal;
+	if (update.autoDrive !== undefined) {
+		if (!goal) throw new Error("mission.update.autoDrive requires an enabled goal mission");
+		goal = { ...goal, ...(update.autoDrive ? { autoDrive: true } : { autoDrive: undefined }) };
+	}
 	if (goal && !budget) throw new Error("mission.update.budget is required when enabling a goal mission");
 	if (goal && budget) {
 		goal = usage.tokens >= budget.tokens
-			? { status: "budget-exhausted" }
+			? { status: "budget-exhausted", ...(goal.autoDrive ? { autoDrive: true } : {}) }
 			: goal.status === "budget-exhausted"
-				? { status: "active" }
+				? { status: "active", ...(goal.autoDrive ? { autoDrive: true } : {}) }
 				: goal;
 	}
 	const hasOpenDecisions = decisions.some((decision) => decision.status === "open");

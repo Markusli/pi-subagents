@@ -45,6 +45,7 @@ export interface MissionLaunchInput {
 	title: string;
 	objective?: string;
 	goal?: true;
+	autoDrive?: boolean;
 	budget?: MissionTokenBudget;
 	labels?: string[];
 }
@@ -53,6 +54,7 @@ export interface MissionUpdateToolInput {
 	title?: string;
 	objective?: string;
 	goal?: boolean | { paused: boolean };
+	autoDrive?: boolean;
 	budget?: MissionTokenBudget;
 	status?: MissionStatus;
 	summary?: string;
@@ -108,13 +110,15 @@ export function validateMissionLaunch(value: unknown): MissionLaunchInput {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("mission must be an object");
 	const input = value as Record<string, unknown>;
 	for (const key of Object.keys(input)) {
-		if (key !== "title" && key !== "summary" && key !== "objective" && key !== "goal" && key !== "budget" && key !== "labels") throw new Error(`mission.${key} is unknown`);
+		if (key !== "title" && key !== "summary" && key !== "objective" && key !== "goal" && key !== "autoDrive" && key !== "budget" && key !== "labels") throw new Error(`mission.${key} is unknown`);
 	}
 	if (input.title !== undefined && input.summary !== undefined) throw new Error("mission.title and mission.summary cannot both be set");
 	const title = input.title ?? input.summary;
 	if (typeof title !== "string" || !title.trim()) throw new Error("mission.title or mission.summary must be a non-empty string");
 	if (input.objective !== undefined && (typeof input.objective !== "string" || !input.objective.trim())) throw new Error("mission.objective must be a non-empty string");
 	if (input.goal !== undefined && input.goal !== true) throw new Error("mission.goal must be true when supplied");
+	if (input.autoDrive !== undefined && typeof input.autoDrive !== "boolean") throw new Error("mission.autoDrive must be a boolean");
+	if (input.autoDrive === true && input.goal !== true) throw new Error("mission.goal must be true when mission.autoDrive is enabled");
 	const budget = input.budget;
 	if (budget !== undefined && (!budget || typeof budget !== "object" || Array.isArray(budget) || !Number.isSafeInteger((budget as { tokens?: unknown }).tokens) || ((budget as { tokens: number }).tokens < 1))) {
 		throw new Error("mission.budget.tokens must be a positive integer");
@@ -127,6 +131,7 @@ export function validateMissionLaunch(value: unknown): MissionLaunchInput {
 		title: title.trim(),
 		...(typeof input.objective === "string" ? { objective: input.objective.trim() } : {}),
 		...(input.goal === true ? { goal: true as const } : {}),
+		...(typeof input.autoDrive === "boolean" ? { autoDrive: input.autoDrive } : {}),
 		...(budget !== undefined ? { budget: { tokens: (budget as { tokens: number }).tokens } } : {}),
 		...(input.labels !== undefined ? { labels: input.labels.map((label) => label.trim()) } : {}),
 	};
@@ -178,7 +183,7 @@ function validateMissionUpdate(value: unknown): MissionUpdateInput {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("missionUpdate must be an object");
 	const input = value as Record<string, unknown>;
 	for (const key of Object.keys(input)) {
-		if (!["title", "objective", "goal", "budget", "status", "summary", "labels", "artifacts", "receipts", "decisions"].includes(key)) throw new Error(`missionUpdate.${key} is unknown`);
+		if (!["title", "objective", "goal", "autoDrive", "budget", "status", "summary", "labels", "artifacts", "receipts", "decisions"].includes(key)) throw new Error(`missionUpdate.${key} is unknown`);
 	}
 	const update: MissionUpdateInput = {};
 	for (const field of ["title", "objective", "summary"] as const) {
@@ -195,6 +200,10 @@ function validateMissionUpdate(value: unknown): MissionUpdateInput {
 			}
 			update.goal = { status: (input.goal as { paused: boolean }).paused ? "paused" : "active" };
 		}
+	}
+	if (input.autoDrive !== undefined) {
+		if (typeof input.autoDrive !== "boolean") throw new Error("missionUpdate.autoDrive must be a boolean");
+		update.autoDrive = input.autoDrive;
 	}
 	if (input.budget !== undefined) {
 		if (!input.budget || typeof input.budget !== "object" || Array.isArray(input.budget) || !Number.isSafeInteger((input.budget as { tokens?: unknown }).tokens) || (input.budget as { tokens: number }).tokens < 1) {
@@ -292,7 +301,7 @@ function formatMission(record: MissionRecord): string {
 		`Objective: ${record.objective}`,
 		`Updated: ${record.updatedAt}`,
 	];
-	if (record.goal && record.budget) lines.push(`Goal mode: ${record.goal.status}`, `Budget: ${record.usage?.tokens ?? 0}/${record.budget.tokens} tokens`);
+	if (record.goal && record.budget) lines.push(`Goal mode: ${record.goal.status}${record.goal.autoDrive ? " (auto-drive)" : ""}`, `Budget: ${record.usage?.tokens ?? 0}/${record.budget.tokens} tokens`);
 	if (record.summary) lines.push(`Summary: ${record.summary}`);
 	if (record.labels?.length) lines.push(`Labels: ${record.labels.join(", ")}`);
 	if (record.runs.length) {
@@ -341,6 +350,7 @@ export function handleMissionAction(
 			title: mission.title,
 			objective: mission.objective ?? mission.title,
 			...(mission.goal === true ? { goal: true as const } : {}),
+			...(typeof mission.autoDrive === "boolean" ? { autoDrive: mission.autoDrive } : {}),
 			...(mission.budget ? { budget: mission.budget } : {}),
 			status: params.missionStatus ? validateStatus(params.missionStatus, "missionStatus") : "planned",
 			...(mission.labels ? { labels: mission.labels } : {}),

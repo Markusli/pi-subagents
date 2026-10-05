@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
 import { handleMissionAction } from "../../src/missions/actions.ts";
-import { collectGoalContinuationNotices } from "../../src/missions/goal-driver.ts";
+import { claimGoalAutoDrive, collectGoalContinuationNotices } from "../../src/missions/goal-driver.ts";
 import { createMission, readMission, resolveMissionStoreLocation, updateMission } from "../../src/missions/store.ts";
 import { missionStatePath } from "../../src/missions/workflow-state.ts";
 import type { RetainedChild } from "../../src/runs/background/retained-children.ts";
@@ -240,5 +240,42 @@ describe("goal mission continuation", () => {
 		} finally {
 			fs.rmSync(test.root, { recursive: true, force: true });
 		}
+	});
+
+	it("marks auto-drive notices only for ungated goal missions", () => {
+		const test = fixture();
+		try {
+			const mission = createMission(test.location, {
+				title: "Autonomous campaign",
+				objective: "Continue until accepted",
+				goal: true,
+				autoDrive: true,
+				budget: { tokens: 100 },
+				status: "active",
+				ownerSessionId: "session-1",
+			});
+			const first = collectGoalContinuationNotices({ location: test.location, ownerSessionId: "session-1", retainedChildren: [], turnId: 1 });
+			assert.equal(first[0]?.autoDrive, true);
+			updateMission(test.location, mission.id, { addDecisions: [{ title: "Need approval" }] });
+			const gated = collectGoalContinuationNotices({ location: test.location, ownerSessionId: "session-1", retainedChildren: [], turnId: 2 });
+			assert.equal(gated[0]?.autoDrive, false);
+		} finally {
+			fs.rmSync(test.root, { recursive: true, force: true });
+		}
+	});
+
+	it("auto-drives each unchanged ready notice at most once per runtime", () => {
+		const seen = new Map<string, string>();
+		const notice = {
+			missionId: "mission-1",
+			message: "Continue objective",
+			autoDrive: true,
+			event: { type: "needs_attention", to: "needs_attention", ts: 1, runId: "goal-1", agent: "goal mission", message: "Continue objective", reason: "idle" } as const,
+		};
+		assert.equal(claimGoalAutoDrive(notice, seen), true);
+		assert.equal(claimGoalAutoDrive(notice, seen), false);
+		assert.equal(claimGoalAutoDrive({ ...notice, message: "Deploy accepted change" }, seen), true);
+		assert.equal(claimGoalAutoDrive({ ...notice, missionId: "mission-2" }, seen), true);
+		assert.equal(claimGoalAutoDrive({ ...notice, autoDrive: false }, seen), false);
 	});
 });

@@ -26,12 +26,14 @@ describe("mission launch lifecycle", () => {
 			summary: "Review the active backlog",
 			objective: "Find ready work",
 			goal: true,
+			autoDrive: true,
 			budget: { tokens: 400000 },
 			labels: ["review"],
 		}), {
 			title: "Review the active backlog",
 			objective: "Find ready work",
 			goal: true,
+			autoDrive: true,
 			budget: { tokens: 400000 },
 			labels: ["review"],
 		});
@@ -42,6 +44,27 @@ describe("mission launch lifecycle", () => {
 		assert.throws(() => validateMissionLaunch({ title: " " }), /non-empty string/);
 		assert.throws(() => validateMissionLaunch({ title: "Title", goal: false }), /must be true/);
 		assert.throws(() => validateMissionLaunch({ title: "Title", goal: true }), /budget is required/);
+		assert.throws(() => validateMissionLaunch({ title: "Title", autoDrive: true }), /goal must be true/);
+	});
+
+	it("persists auto-drive on ordinary mission-bound launches", () => {
+		const test = projectFixture();
+		try {
+			const binding = prepareMissionLaunch({
+				params: {
+					workflow: "reviewed-implementation",
+					args: { task: "Implement", gate: "npm test" },
+					mission: { title: "Autonomous campaign", goal: true, autoDrive: true, budget: { tokens: 1000 } },
+				},
+				projectRoot: test.projectRoot,
+				config: test.missionConfig,
+				ownerSessionId: "session-1",
+			});
+			assert.ok(binding);
+			assert.deepEqual(readMission(binding.location, binding.missionId).goal, { status: "active", autoDrive: true });
+		} finally {
+			fs.rmSync(test.root, { recursive: true, force: true });
+		}
 	});
 
 	it("creates missions by default for task launches and honors explicit opt-out", () => {

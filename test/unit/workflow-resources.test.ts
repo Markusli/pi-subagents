@@ -194,6 +194,8 @@ describe("named workflow resources", () => {
 		assert.equal(launches[0]?.params.skill, "stationer-sqlmesh-operations");
 		assert.equal(launches[1]?.params.agent, "reviewer");
 		assert.equal(launches[1]?.params.acceptance, false);
+		assert.match(String(launches[1]?.params.task), /Implement the requested fix\./);
+		assert.match(String(launches[1]?.params.task), /Current writer evidence:\nimplemented/);
 		assert.deepEqual(stateWrites, [["nextReadyAction", "Continue the mission after accepted implementation through its remaining delivery and verification work."]]);
 		assert.deepEqual(execution.value, { verdict: "accepted", writerRunId: "writer-1", reviewerRunId: "reviewer-1", reviewRounds: 1 });
 	});
@@ -218,6 +220,9 @@ describe("named workflow resources", () => {
 		assert.deepEqual(launches.map(({ key }) => key), ["implement", "review-1", "repair-1", "review-2"]);
 		assert.equal(launches[2]?.params.resume, "writer-1");
 		assert.match(String(launches[2]?.params.task), /Fix edge case/);
+		assert.match(String(launches[2]?.params.task), /Original implementation contract:\nFix/);
+		assert.match(String(launches[2]?.params.task), /non-mutating verification/);
+		assert.match(String(launches[3]?.params.task), /Current writer evidence:\nfixed/);
 		assert.deepEqual(execution.value, { verdict: "accepted", writerRunId: "writer-2", reviewerRunId: "reviewer-2", reviewRounds: 2 });
 	});
 

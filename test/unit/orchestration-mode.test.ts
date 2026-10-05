@@ -98,6 +98,7 @@ describe("orchestration mode", () => {
 		assert.match(prompt.systemPrompt, /mechanical rerun alone is insufficient/i);
 		assert.match(prompt.systemPrompt, /compile the user's prose contract into the existing Pi primitives/i);
 		assert.match(prompt.systemPrompt, /reuse the same mission across continuation\/review runs/i);
+		assert.match(prompt.systemPrompt, /do not replace a failed workflow with an ad-hoc sequence of direct children/i);
 
 		const guideInput: Record<string, unknown> = { action: "guide", topic: "workflows" };
 		assert.equal((await emit(h, "tool_call", { toolName: "subagent", input: guideInput }))[0], undefined);

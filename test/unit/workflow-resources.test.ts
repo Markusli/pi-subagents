@@ -161,18 +161,17 @@ describe("named workflow resources", () => {
 		assert.equal((execution.value as { ok?: boolean }).ok, true);
 	});
 
-	it("resolves reviewed implementation into worker, host gate, and fresh structured review", async () => {
+	it("resolves reviewed implementation into one writer and fresh structured review", async () => {
 		const resolved = resolveWorkflowResource("reviewed-implementation", {
 			task: "Implement the requested fix.",
-			gate: "npm test",
-			timeoutMs: 1_000,
+			skill: "stationer-sqlmesh-operations",
 			maxReviewRounds: 2,
 		});
 		assert.equal(resolved.ok, true);
 		if (!resolved.ok) return;
 		assert.match(resolved.resource.script, /runs\.run\("implement"/);
 		assert.match(resolved.resource.script, /agent: "reviewer"/);
-		assert.match(resolved.resource.script, /gate:/);
+		assert.doesNotMatch(resolved.resource.script, /gate:/);
 		assert.match(resolved.resource.script, /resume: writer\.runId/);
 		assert.match(resolved.resource.script, /verdict: "accepted"/);
 		consumeWorkflowResourcePermit(resolved.resource.permit, resolved.resource.script);
@@ -192,15 +191,15 @@ describe("named workflow resources", () => {
 			async status(key) { return { key, ok: true, output: "complete", artifactPaths: [] }; },
 		});
 		assert.deepEqual(launches.map(({ key }) => key), ["implement", "review-1"]);
+		assert.equal(launches[0]?.params.skill, "stationer-sqlmesh-operations");
 		assert.equal(launches[1]?.params.agent, "reviewer");
 		assert.equal(launches[1]?.params.acceptance, false);
-		assert.deepEqual(launches[1]?.params.gate, { command: "npm test", timeoutMs: 1_000 });
 		assert.deepEqual(stateWrites, [["nextReadyAction", "Continue the mission after accepted implementation through its remaining delivery and verification work."]]);
 		assert.deepEqual(execution.value, { verdict: "accepted", writerRunId: "writer-1", reviewerRunId: "reviewer-1", reviewRounds: 1 });
 	});
 
 	it("repairs through the original writer and requires a fresh clean review", async () => {
-		const resolved = resolveWorkflowResource("reviewed-implementation", { task: "Fix", gate: "npm test", maxReviewRounds: 2 });
+		const resolved = resolveWorkflowResource("reviewed-implementation", { task: "Fix", maxReviewRounds: 2 });
 		assert.equal(resolved.ok, true);
 		if (!resolved.ok) return;
 		const launches: Array<{ key: string; params: Record<string, unknown> }> = [];
@@ -219,13 +218,11 @@ describe("named workflow resources", () => {
 		assert.deepEqual(launches.map(({ key }) => key), ["implement", "review-1", "repair-1", "review-2"]);
 		assert.equal(launches[2]?.params.resume, "writer-1");
 		assert.match(String(launches[2]?.params.task), /Fix edge case/);
-		assert.deepEqual(launches[1]?.params.gate, { command: "npm test", timeoutMs: 120_000 });
-		assert.deepEqual(launches[3]?.params.gate, { command: "npm test", timeoutMs: 120_000 });
 		assert.deepEqual(execution.value, { verdict: "accepted", writerRunId: "writer-2", reviewerRunId: "reviewer-2", reviewRounds: 2 });
 	});
 
-	it("fails the stage when the gated reviewer run fails instead of silently repairing", async () => {
-		const resolved = resolveWorkflowResource("reviewed-implementation", { task: "Fix", gate: "npm test", maxReviewRounds: 2 });
+	it("fails the stage when the reviewer run fails instead of silently repairing", async () => {
+		const resolved = resolveWorkflowResource("reviewed-implementation", { task: "Fix", maxReviewRounds: 2 });
 		assert.equal(resolved.ok, true);
 		if (!resolved.ok) return;
 		const launches: string[] = [];
@@ -234,21 +231,21 @@ describe("named workflow resources", () => {
 			async launch(key) {
 				launches.push(key);
 				if (key === "implement") return { key, ok: true, runId: "writer-1", output: "implemented", artifactPaths: [] };
-				if (key === "review-1") return { key, ok: false, runId: "reviewer-1", output: "gate failed", error: "gate failed", artifactPaths: [] };
+				if (key === "review-1") return { key, ok: false, runId: "reviewer-1", output: "review failed", error: "review failed", artifactPaths: [] };
 				throw new Error(`Unexpected child ${key}`);
 			},
 			async status(key) { return { key, ok: true, output: "complete", artifactPaths: [] }; },
-		}), /review-1.*gate failed/);
+		}), /review-1.*review failed/);
 		assert.deepEqual(launches, ["implement", "review-1"]);
 	});
 
 	it("bounds reviewed implementation configuration", () => {
 		for (const args of [
 			{},
-			{ task: "Fix", gate: "" },
-			{ task: "Fix", gate: "npm test", timeoutMs: 0 },
-			{ task: "Fix", gate: "npm test", maxReviewRounds: 4 },
-			{ task: "Fix", gate: "npm test", reviewer: "oracle" },
+			{ task: "Fix", skill: "" },
+			{ task: "Fix", maxReviewRounds: 4 },
+			{ task: "Fix", gate: "npm test" },
+			{ task: "Fix", reviewer: "oracle" },
 		]) assert.equal(resolveWorkflowResource("reviewed-implementation", args).ok, false);
 	});
 

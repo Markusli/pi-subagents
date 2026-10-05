@@ -108,21 +108,22 @@ subagent({ workflow: "run-ci", args: { command: "npm test" } });
 
 The host resolves the name and validates bounded plain-JSON `args` before starting the workflow. Resource provenance is recorded in workflow details and receipts for downstream permission/policy checks. Resource authority is not caller-supplied: `runs.host` is available only when the resolved resource explicitly grants the requested host key and command. Reply-block (`workflow: true`) and file-path scripts remain raw, unknown-provenance inputs, so their `runs.host` calls are unavailable through the public execution boundary. Named resources cannot be combined with `agent` or `task`; package-owned resources include `review`, `reviewed-implementation`, and `run-ci`, not a user/project resource registry.
 
-Use `reviewed-implementation` when a coding stage must not be considered accepted until an authoritative host gate passes and a fresh read-only reviewer has checked the current working-tree diff:
+Use `reviewed-implementation` when a coding stage must not be considered accepted until a fresh read-only reviewer has checked the current working-tree diff:
 
 ```ts
 subagent({
   workflow: "reviewed-implementation",
   args: {
     task: "Implement the approved ingestion fix and keep the scope narrow.",
-    gate: "python -m pytest -q tests/dagster/ingestion/test_ncei_asos.py tests/dagster/ingestion/test_twdb_texmesonet.py",
-    timeoutMs: 120000,
+    skill: "stationer-dagster-operations",
     maxReviewRounds: 2
   }
 })
 ```
 
-The resource launches one `worker`, then launches a fresh `reviewer` whose run carries the exact admitted gate and a bounded structured `clean | blockers` verdict. A clean reviewer whose gate also passes returns `verdict: "accepted"`. A reviewer-declared blocker resumes the original writer and requires another fresh gated reviewer; the loop fails when the configured review-round cap is exhausted. Child, provider, timeout, or gate failures fail the workflow normally so the parent (or an auto-drive goal mission) can recover with the full run receipt instead of hiding infrastructure failure inside a repair loop. When attached to a mission, successful acceptance also sets `state.nextReadyAction` so an auto-drive goal can hand control back to the parent for remaining delivery and verification work. The parent cannot receive a successful workflow result after implementation alone, so review is an executable stage contract rather than a prose reminder. The resource deliberately fixes the writer and reviewer roles and supports only the gate, timeout, and a 1–3 review-round cap; broader workflow policy belongs in ordinary scripted workflows.
+The resource launches one `worker` (with the optional explicitly bound `skill`), then launches a fresh `reviewer` with a bounded structured `clean | blockers` verdict. A clean reviewer returns `verdict: "accepted"`. A reviewer-declared blocker resumes the original writer and requires another fresh reviewer; the loop fails when the configured review-round cap is exhausted. Child, provider, timeout, or reviewer failures fail the workflow normally so the parent (or an auto-drive goal mission) can recover with the full run receipt instead of hiding infrastructure failure inside a repair loop. When attached to a mission, successful acceptance also sets `state.nextReadyAction` so an auto-drive goal can hand control back to the parent for remaining delivery and verification work. The parent cannot receive a successful workflow result after implementation alone, so review is an executable stage contract rather than a prose reminder.
+
+`reviewed-implementation` deliberately carries no host-shell authority. Validation commands remain evidence owned by the worker or by a separate execution/validation stage; the workflow exists to make independent review non-skippable, not to create an indirect shell path for coordinators. The reviewer must have a bounded read-only diff capability such as `watchdog_diff` when its task requires working-tree review.
 
 ### Opt-in bounded workflows
 

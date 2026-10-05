@@ -172,19 +172,16 @@ function resolveReview(args: Readonly<Record<string, unknown>>): ReturnType<Work
 }
 
 function resolveReviewedImplementation(args: Readonly<Record<string, unknown>>): ReturnType<WorkflowResourceDefinition["resolve"]> {
-	const allowed = new Set(["task", "gate", "timeoutMs", "maxReviewRounds"]);
+	const allowed = new Set(["task", "skill", "maxReviewRounds"]);
 	const unsupported = Object.keys(args).filter((key) => !allowed.has(key));
 	if (unsupported.length > 0) return { error: `workflow 'reviewed-implementation' args contain unsupported fields: ${unsupported.join(", ")}.` };
 	const task = args.task;
-	const gate = args.gate;
-	const timeoutMs = args.timeoutMs ?? 120_000;
+	const skill = args.skill;
 	const maxReviewRounds = args.maxReviewRounds ?? 2;
 	if (typeof task !== "string" || !task.trim()) return { error: "workflow 'reviewed-implementation' requires a non-empty string args.task." };
-	if (typeof gate !== "string" || !gate.trim()) return { error: "workflow 'reviewed-implementation' requires a non-empty string args.gate." };
-	if (!Number.isInteger(timeoutMs) || (timeoutMs as number) < 1 || (timeoutMs as number) > 86_400_000) return { error: "workflow 'reviewed-implementation' args.timeoutMs must be an integer from 1 to 86400000." };
+	if (skill !== undefined && (typeof skill !== "string" || !skill.trim())) return { error: "workflow 'reviewed-implementation' args.skill must be a non-empty string when provided." };
 	if (!Number.isInteger(maxReviewRounds) || (maxReviewRounds as number) < 1 || (maxReviewRounds as number) > 3) return { error: "workflow 'reviewed-implementation' args.maxReviewRounds must be an integer from 1 to 3." };
 	const reviewRounds = maxReviewRounds as number;
-	const command = gate.trim();
 	const reviewSchema = {
 		type: "object",
 		properties: {
@@ -194,14 +191,17 @@ function resolveReviewedImplementation(args: Readonly<Record<string, unknown>>):
 		required: ["verdict", "findings"],
 		additionalProperties: false,
 	};
-	const gateInput = { command, timeoutMs };
+	const writerParams = {
+		agent: "worker",
+		task: task.trim(),
+		...(typeof skill === "string" ? { skill: skill.trim() } : {}),
+	};
 	const script = `
-let writer = await runs.run("implement", { agent: "worker", task: ${JSON.stringify(task.trim())} });
+let writer = await runs.run("implement", ${JSON.stringify(writerParams)});
 for (let round = 1; round <= ${reviewRounds}; round += 1) {
   const review = await runs.run("review-" + round, {
     agent: "reviewer",
     acceptance: false,
-    gate: ${JSON.stringify(gateInput)},
     task: "Fresh independent review of the current working-tree diff. Inspect the actual changed files and relevant contracts. Return verdict=clean only when there are no concrete actionable correctness, regression, test, or unnecessary-complexity findings caused or exposed by this diff. Return verdict=blockers with concise findings otherwise. Do not edit files or delegate.",
     outputSchema: ${JSON.stringify(reviewSchema)}
   });

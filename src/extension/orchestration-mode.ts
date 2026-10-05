@@ -20,6 +20,13 @@ const DIRECT_LAUNCH_FIELDS = new Set([
 	"mission", "missionId", "agentScope", "capabilityCeiling",
 ]);
 
+const REVIEWED_IMPLEMENTATION_FIELDS = new Set([
+	"workflow", "args", "cwd", "worktree", "baseRef", "context", "async",
+	"timeoutMs", "maxRuntimeMs", "checkpointBeforeDeadlineMs", "toolTimeoutMs",
+	"toolBudget", "usageBudget", "artifacts", "includeProgress", "chatProgress",
+	"control", "mission", "missionId", "agentScope", "capabilityCeiling",
+]);
+
 const MANAGEMENT_ACTION_FIELDS: Record<string, ReadonlySet<string>> = {
 	list: new Set(["action", "capabilities", "agentScope"]),
 	// Read-only discovery of retained resumable workflow writers. It is not an
@@ -49,9 +56,9 @@ For substantial multi-step delegated work, compile the user's prose contract int
 
 Use bounded read-only inspection directly when it can cheaply establish current state or close a factual gap. Delegate when fresh context, specialization, parallelism, isolation, data/shell execution, independent challenge, or mutation ownership is materially useful. Do not perform leaf implementation, shell execution, data computation, source mutation, or substitute your own routine review for an independent reviewer when one is required. Generic child roles intentionally receive no default skills: bind only the smallest applicable skill set with the singular child launch parameter \`skill\`. If an explicitly requested skill cannot resolve, treat that as a routing error rather than silently continuing.
 
-The worker remains the sole implementation writer. Consume its concrete changed-file and validation evidence before deciding what comes next. For sequential mutation in the same working state, resume the most recent writer by default; start a fresh writer only when fresh context or isolation is itself useful. Use a fresh reviewer when independent review is requested, required by the task/routing contract, or materially useful to acceptance; do not add review ceremony solely because a mutation occurred. Adjudicate reviewer findings, send accepted concrete defects back to the same worker when practical, and re-establish affected evidence after repair instead of assuming the fix closes the task. If a repair changes a semantic mechanism, contract, evidence generator, validation boundary, or population/coverage assumption, run a fresh targeted review of that changed blast radius unless a deterministic oracle fully proves it; a mechanical rerun alone is insufficient. A supported blocked state is a valid terminal outcome.
+The worker remains the sole implementation writer. Consume its concrete changed-file and validation evidence before deciding what comes next. For sequential mutation in the same working state, resume the most recent writer by default; start a fresh writer only when fresh context or isolation is itself useful. Use a fresh reviewer when independent review is requested, required by the task/routing contract, or materially useful to acceptance; do not add review ceremony solely because a mutation occurred. When implementation plus mandatory independent review is one bounded stage, the package-owned \`reviewed-implementation\` named workflow may compose the user \`worker\` and fresh user \`reviewer\`; it carries no host-shell authority, so project validation remains separate evidence. Adjudicate reviewer findings, send accepted concrete defects back to the same worker when practical, and re-establish affected evidence after repair instead of assuming the fix closes the task. If a repair changes a semantic mechanism, contract, evidence generator, validation boundary, or population/coverage assumption, run a fresh targeted review of that changed blast radius unless a deterministic oracle fully proves it; a mechanical rerun alone is insufficient. A supported blocked state is a valid terminal outcome.
 
-Do not bypass semantic roles with external CLI writer agents, acceptance/gate shell commands, raw workflow scripts, or model overrides. Prefer direct role launches and native Pi lifecycle/status/mission operations. Read-only \`children.list\` discovers retained resumable workflow writers; it is not an exhaustive list of direct native children. Do not invent a second orchestration state machine: repository/result state plus existing mission, child, repository, and acceptance evidence are authoritative.
+Do not bypass semantic roles with external CLI writer agents, acceptance/gate shell commands, raw workflow scripts, unapproved named workflows, or model overrides. Prefer direct role launches and native Pi lifecycle/status/mission operations. The sole workflow exception is package-owned \`reviewed-implementation\`, whose child roles remain inside the same user-role capability ceiling. Read-only \`children.list\` discovers retained resumable workflow writers; it is not an exhaustive list of direct native children. Do not invent a second orchestration state machine: repository/result state plus existing mission, child, repository, and acceptance evidence are authoritative.
 </orchestration_mode>`;
 
 interface PersistedModeState { enabled: boolean; normalTools?: string[] }
@@ -241,6 +248,23 @@ export function registerOrchestrationMode(pi: ExtensionAPI, options: Orchestrati
 				if ("block" in ceiling) return { block: ceiling as OrchestrationPolicyDecision, params: normalized };
 				normalized.capabilityCeiling = ceiling;
 			}
+			return { params: normalized };
+		}
+		if (normalized.workflow !== undefined) {
+			if (normalized.workflow !== "reviewed-implementation") {
+				return { block: { block: true, reason: "Pi orchestration mode permits only the package-owned 'reviewed-implementation' named workflow; raw, file-backed, and other named workflows are not allowed." }, params: normalized };
+			}
+			const unexpected = Object.keys(normalized).filter((field) => normalized[field] !== undefined && !REVIEWED_IMPLEMENTATION_FIELDS.has(field));
+			if (unexpected.length > 0) {
+				return { block: { block: true, reason: `Pi orchestration mode forbids reviewed-implementation override(s): ${unexpected.join(", ")}.` }, params: normalized };
+			}
+			if (!normalized.args || typeof normalized.args !== "object" || Array.isArray(normalized.args)) {
+				return { block: { block: true, reason: "Pi orchestration mode requires reviewed-implementation args to be a plain object." }, params: normalized };
+			}
+			const ceiling = userRoleCapabilityCeiling();
+			if ("block" in ceiling) return { block: ceiling as OrchestrationPolicyDecision, params: normalized };
+			normalized.agentScope = "user";
+			normalized.capabilityCeiling = ceiling;
 			return { params: normalized };
 		}
 		if (typeof normalized.agent !== "string" || typeof normalized.task !== "string") {

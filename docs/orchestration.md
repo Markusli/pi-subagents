@@ -49,13 +49,14 @@ Purely mechanical repairs such as formatting, typo fixes, or deterministic field
 
 ## Permitted orchestration surface
 
-Use direct semantic child launches plus native lifecycle/status actions. Do not use raw `workflowScript`, workflow files, acceptance/gate shell commands, model overrides, or external CLI writer fallbacks while orchestration mode is active.
+Use direct semantic child launches plus native lifecycle/status actions. Do not use raw `workflowScript`, workflow files, unapproved named workflows, acceptance/gate shell commands, model overrides, or external CLI writer fallbacks while orchestration mode is active. The sole named-workflow exception is package-owned `reviewed-implementation`, which composes the user `worker` and fresh user `reviewer` under the same capability ceiling and carries no host-shell authority.
 
 Supported patterns include:
 
 ```text
 subagent({ agent: "worker", task: "Implement the bounded change." })
 subagent({ agent: "reviewer", task: "Review the concrete result." })
+subagent({ workflow: "reviewed-implementation", args: { task: "Implement and independently review the bounded change." } })
 subagent({ action: "resume", id: "<worker-run>", message: "Repair these accepted findings: ..." })
 subagent({ action: "status", id: "<run>" })
 subagent({ action: "children.list" })

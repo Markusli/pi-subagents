@@ -116,10 +116,23 @@ describe("orchestration mode", () => {
 			assert.equal((await emit(h, "tool_call", { toolName: "subagent", input }))[0], undefined, JSON.stringify(input));
 		}
 
+		const reviewedWorkflow: Record<string, unknown> = {
+			workflow: "reviewed-implementation",
+			args: { task: "Implement and review the bounded fix", skill: "stationer-sqlmesh-operations" },
+			mission: { title: "Ship bounded fix", objective: "Implement and independently review the bounded fix" },
+			async: true,
+		};
+		assert.equal((await emit(h, "tool_call", { toolName: "subagent", input: reviewedWorkflow }))[0], undefined);
+		assert.equal(reviewedWorkflow.agentScope, "user");
+		assert.deepEqual((reviewedWorkflow.capabilityCeiling as { allowedAgents?: string[] }).allowedAgents, ["experiment-spot-cpu", "experiment-spot-gpu", "reviewer", "scout", "worker"]);
+
 		for (const input of [
 			{ agent: "worker", task: "x", model: "other/model" },
 			{ workflowScript: "return runs.run('x', {agent:'worker'})" },
 			{ workflowScriptPath: "/tmp/workflow.js" },
+			{ workflow: true, args: { task: "escape" } },
+			{ workflow: "review", args: { task: "escape" } },
+			{ workflow: "reviewed-implementation", args: { task: "x" }, gate: "echo unsafe" },
 			{ agent: "reviewer", task: "x", gate: "echo unsafe" },
 			{ agent: "reviewer", task: "x", acceptance: { verify: [{ command: "echo unsafe" }] } },
 			{ agent: "worker", task: "x", share: true },
@@ -186,11 +199,16 @@ describe("orchestration mode", () => {
 		for (const input of [
 			{ workflowScript: "return runs.run('run', {agent:'worker'})" },
 			{ workflowScriptPath: "/tmp/workflow.js" },
+			{ workflow: "review", args: { task: "escape" } },
 			{ agent: "runtime-writer", task: "escape" },
 			{ agent: "worker", task: "x", model: "other/model" },
 		]) {
 			assert.equal(h.handle.applyPolicy({ ...input }).block?.block, true, JSON.stringify(input));
 		}
+		const reviewed = h.handle.applyPolicy({ workflow: "reviewed-implementation", args: { task: "Implement and review" } });
+		assert.equal(reviewed.block, undefined);
+		assert.equal(reviewed.params.agentScope, "user");
+		assert.deepEqual((reviewed.params.capabilityCeiling as { allowedAgents?: string[] }).allowedAgents, ["experiment-spot-cpu", "experiment-spot-gpu", "reviewer", "scout", "worker"]);
 
 		// A direct launch that the model hook already normalized must pass the
 		// second (execute-time) application unchanged, including the policy fields.

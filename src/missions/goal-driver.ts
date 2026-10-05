@@ -14,6 +14,13 @@ export interface GoalContinuationNotice {
 	missionId: string;
 	message: string;
 	event: ControlEvent;
+	autoDrive: boolean;
+}
+
+export function claimGoalAutoDrive(notice: GoalContinuationNotice, seen: Map<string, string>): boolean {
+	if (!notice.autoDrive || seen.get(notice.missionId) === notice.message) return false;
+	seen.set(notice.missionId, notice.message);
+	return true;
 }
 
 function bounded(value: string): string {
@@ -146,10 +153,13 @@ export function collectGoalContinuationNotices(input: {
 			}
 			if (record.runs.some((run) => run.status && ACTIVE_RUN_STATUSES.has(run.status))) continue;
 			if (seen.has(record.id) || !record.budget) continue;
+			const goal = record.goal;
+			if (!goal) continue;
 			seen.add(record.id);
 			const budget = record.budget.tokens;
 			const used = record.usage?.tokens ?? 0;
 			const remaining = Math.max(0, budget - used);
+			const autoDrive = goal.autoDrive === true && !record.decisions.some((decision) => decision.status === "open");
 			const message = [
 				`Goal mission needs attention: ${bounded(record.title)}`,
 				`Mission: ${record.id}`,
@@ -159,6 +169,7 @@ export function collectGoalContinuationNotices(input: {
 			notices.push({
 				missionId: record.id,
 				message,
+				autoDrive,
 				event: {
 					type: "needs_attention",
 					to: "needs_attention",

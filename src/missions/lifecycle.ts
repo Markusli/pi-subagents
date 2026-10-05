@@ -76,6 +76,7 @@ export function prepareMissionLaunch(input: {
 		title,
 		objective: promptDerivedObjective || title,
 		...(mission?.goal === true ? { goal: true as const } : {}),
+		...(mission?.autoDrive === true ? { autoDrive: true } : {}),
 		...(mission?.budget ? { budget: mission.budget } : {}),
 		status: "active",
 		...(mission?.labels ? { labels: mission.labels } : {}),

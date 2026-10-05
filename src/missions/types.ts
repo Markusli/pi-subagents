@@ -17,6 +17,7 @@ export type MissionGoalStatus = "active" | "paused" | "budget-exhausted";
 
 export interface MissionGoal {
 	status: MissionGoalStatus;
+	autoDrive?: boolean;
 }
 
 export interface MissionTokenBudget {
@@ -165,6 +166,7 @@ export interface MissionCreateInput {
 	title: string;
 	objective: string;
 	goal?: boolean;
+	autoDrive?: boolean;
 	budget?: MissionTokenBudget;
 	status?: MissionStatus;
 	labels?: string[];
@@ -175,6 +177,7 @@ export interface MissionUpdateInput {
 	title?: string;
 	objective?: string;
 	goal?: MissionGoal | false;
+	autoDrive?: boolean;
 	budget?: MissionTokenBudget;
 	usage?: MissionTokenUsage;
 	status?: MissionStatus;

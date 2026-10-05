@@ -53,7 +53,24 @@ subagent({
 })
 ```
 
-After each parent turn, an idle goal mission sends one needs-attention notice with its title, remaining token budget, and next ready action. The action comes from `state.nextReadyAction`, `state.nextAction`, a state item with `status: "ready"`, an open decision, or linked-run state. A workflow can write `state.nextReadyAction` to tell the next notice exactly what work is ready. When the latest linked workflow has a resumable retained child, the notice names that child as the `resume` target. Non-resumable retained children stay visible in `children.list` with their reason, but goal notices do not present them as resume targets. The extension never launches or replans goal work by itself.
+Add `autoDrive: true` when that goal should continue automatically instead of only notifying the owner session:
+
+```ts
+subagent({
+  action: "mission.create",
+  mission: {
+    title: "Ship auth refresh",
+    objective: "Implement, review, deploy and verify token refresh",
+    goal: true,
+    autoDrive: true,
+    budget: { tokens: 400000 }
+  }
+})
+```
+
+After each parent turn, an idle goal mission sends one needs-attention notice with its title, remaining token budget, and next ready action. The action comes from `state.nextReadyAction`, `state.nextAction`, a state item with `status: "ready"`, an open decision, or linked-run state. A workflow can write `state.nextReadyAction` to tell the next notice exactly what work is ready. When the latest linked workflow has a resumable retained child, the notice names that child as the `resume` target. Non-resumable retained children stay visible in `children.list` with their reason, but goal notices do not present them as resume targets.
+
+By default the notice does not start a model turn. With `autoDrive: true`, an otherwise actionable idle goal notice starts the next owner-session turn automatically. The same unchanged ready notice auto-drives at most once per extension runtime, so a no-progress parent turn cannot recursively wake itself forever; changing the ready action or other notice evidence permits the next continuation. Active linked runs, paused or budget-exhausted goals, and open mission decisions still suppress automatic continuation. Auto-drive does not invent a phase plan, launch a child by itself, or mirror external system state; it only removes the manual `continue` handoff for the existing goal mission. Disable it with `mission.update` and `{ autoDrive: false }`, or pause/disable the goal using the existing goal controls.
 
 Linked-run token totals are stored on each run and folded into mission `usage`. An active linked run suppresses notices. Reaching the token budget changes the goal status to `budget-exhausted` and stops notices without closing the mission or reporting success.
 

@@ -77,6 +77,17 @@ describe("subagent control notice delivery", () => {
 		assert.deepEqual(recorder.sent[0]?.options, { triggerTurn: false });
 	});
 
+	it("starts a new turn for auto-drive goal notices", () => {
+		const recorder = makeRecorder();
+		handleSubagentControlNotice({
+			pi: recorder.pi,
+			state: makeState(),
+			visibleControlNotices: new Set(),
+			details: { source: "goal", event: needsAttentionEvent(), noticeText: "Continue mission.", autoDrive: true },
+		});
+		assert.deepEqual(recorder.sent[0]?.options, { triggerTurn: true });
+	});
+
 	it("sends nothing for a deferred supervisor-request status event", () => {
 		const recorder = makeRecorder();
 		handleSubagentControlNotice({ pi: recorder.pi, state: makeState(), visibleControlNotices: new Set(), details: { source: "async", event: needsAttentionEvent({ reason: "supervisor_request" }), noticeDeferred: true } });

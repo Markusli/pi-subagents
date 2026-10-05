@@ -171,8 +171,58 @@ function resolveReview(args: Readonly<Record<string, unknown>>): ReturnType<Work
 	};
 }
 
+function resolveReviewedImplementation(args: Readonly<Record<string, unknown>>): ReturnType<WorkflowResourceDefinition["resolve"]> {
+	const allowed = new Set(["task", "gate", "timeoutMs", "maxReviewRounds"]);
+	const unsupported = Object.keys(args).filter((key) => !allowed.has(key));
+	if (unsupported.length > 0) return { error: `workflow 'reviewed-implementation' args contain unsupported fields: ${unsupported.join(", ")}.` };
+	const task = args.task;
+	const gate = args.gate;
+	const timeoutMs = args.timeoutMs ?? 120_000;
+	const maxReviewRounds = args.maxReviewRounds ?? 2;
+	if (typeof task !== "string" || !task.trim()) return { error: "workflow 'reviewed-implementation' requires a non-empty string args.task." };
+	if (typeof gate !== "string" || !gate.trim()) return { error: "workflow 'reviewed-implementation' requires a non-empty string args.gate." };
+	if (!Number.isInteger(timeoutMs) || (timeoutMs as number) < 1 || (timeoutMs as number) > 86_400_000) return { error: "workflow 'reviewed-implementation' args.timeoutMs must be an integer from 1 to 86400000." };
+	if (!Number.isInteger(maxReviewRounds) || (maxReviewRounds as number) < 1 || (maxReviewRounds as number) > 3) return { error: "workflow 'reviewed-implementation' args.maxReviewRounds must be an integer from 1 to 3." };
+	const reviewRounds = maxReviewRounds as number;
+	const command = gate.trim();
+	const reviewSchema = {
+		type: "object",
+		properties: {
+			verdict: { type: "string", enum: ["clean", "blockers"] },
+			findings: { type: "array", items: { type: "string" }, maxItems: 32 },
+		},
+		required: ["verdict", "findings"],
+		additionalProperties: false,
+	};
+	const gateInput = { command, timeoutMs };
+	const script = `
+let writer = await runs.run("implement", { agent: "worker", task: ${JSON.stringify(task.trim())} });
+for (let round = 1; round <= ${reviewRounds}; round += 1) {
+  const review = await runs.run("review-" + round, {
+    agent: "reviewer",
+    acceptance: false,
+    gate: ${JSON.stringify(gateInput)},
+    task: "Fresh independent review of the current working-tree diff. Inspect the actual changed files and relevant contracts. Return verdict=clean only when there are no concrete actionable correctness, regression, test, or unnecessary-complexity findings caused or exposed by this diff. Return verdict=blockers with concise findings otherwise. Do not edit files or delegate.",
+    outputSchema: ${JSON.stringify(reviewSchema)}
+  });
+  if (review.structuredOutput.verdict === "clean") {
+    if (typeof state !== "undefined") state.set("nextReadyAction", "Continue the mission after accepted implementation through its remaining delivery and verification work.");
+    return { verdict: "accepted", writerRunId: writer.runId, reviewerRunId: review.runId, reviewRounds: round };
+  }
+  if (round === ${reviewRounds}) throw new Error("Independent review still has blockers after the configured review-round cap.");
+  if (!writer.runId) throw new Error("Implementation worker did not return a resumable run id for repair.");
+  writer = await runs.run("repair-" + round, {
+    resume: writer.runId,
+    task: "Address only these independent review findings, preserve the approved scope, and return when the fixes are complete:\\n" + review.structuredOutput.findings.join("\\n")
+  });
+}
+throw new Error("Reviewed implementation did not settle.");`;
+	return { script };
+}
+
 const WORKFLOW_RESOURCES: readonly WorkflowResourceDefinition[] = [
 	{ name: "review", version: 1, resolve: resolveReview },
+	{ name: "reviewed-implementation", version: 1, resolve: resolveReviewedImplementation },
 	{ name: "run-ci", version: 1, resolve: resolveRunCi },
 ];
 

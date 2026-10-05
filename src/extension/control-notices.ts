@@ -10,6 +10,7 @@ export interface SubagentControlMessageDetails {
 	asyncDir?: string;
 	childIntercomTarget?: string;
 	noticeText?: string;
+	autoDrive?: boolean;
 	/** Status-only copy of a supervisor request; the tracker sends the notice later if the request is still unanswered. */
 	noticeDeferred?: boolean;
 }
@@ -39,7 +40,7 @@ function deliverControlNotice(input: {
 			display: true,
 			details: { ...input.details, childIntercomTarget, noticeText },
 		},
-		{ triggerTurn: input.details.source === "async" },
+		{ triggerTurn: input.details.source === "async" || (input.details.source === "goal" && input.details.autoDrive === true) },
 	);
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { afterEach, test } from "node:test";
+import { after, afterEach, test } from "node:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -10,6 +10,8 @@ import { TEMP_ROOT_DIR } from "../../src/shared/types.ts";
 import { writeNodeCommand } from "../support/node-command.ts";
 
 const tempDirs: string[] = [];
+const testKeepAlive = setInterval(() => {}, 1_000);
+after(() => clearInterval(testKeepAlive));
 
 function removeProgressFiles(prefix: string): void {
 	const root = path.join(TEMP_ROOT_DIR, "orca-progress");

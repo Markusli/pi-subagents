@@ -16,6 +16,7 @@ import { SUPERVISOR_REPLY_ENTRY_TYPE, SUPERVISOR_REQUEST_MESSAGE_TYPE } from "..
 import { INTERCOM_DETACH_REQUEST_EVENT, type SubagentState } from "../../src/shared/types.ts";
 
 const createdChannels: string[] = [];
+const originalReaddirSync = fsDefault.readdirSync;
 
 function makeState(sessionId: string | null, ctx: unknown): SubagentState {
 	return {
@@ -93,6 +94,8 @@ async function waitForCondition(condition: () => boolean, description: string): 
 
 afterEach(() => {
 	delete process.env.PI_INTERCOM_ASK_TIMEOUT_MS;
+	fsDefault.readdirSync = originalReaddirSync;
+	syncBuiltinESMExports();
 	for (const channel of createdChannels.splice(0)) fs.rmSync(channel, { recursive: true, force: true });
 });
 
@@ -125,9 +128,12 @@ describe("native supervisor channel", () => {
 			});
 			const readdir = fsDefault.readdirSync;
 			let scans = 0;
+			let enforceScopedReads = true;
 			fsDefault.readdirSync = ((dir: fs.PathLike, options: unknown) => {
-				assert.equal(String(dir), path.join(ownDir, "requests"), "coordinators must not scan unrelated retained channels");
-				scans++;
+				if (enforceScopedReads) {
+					assert.equal(String(dir), path.join(ownDir, "requests"), "coordinators must not scan unrelated retained channels");
+					scans++;
+				}
 				return (readdir as (dir: fs.PathLike, options: unknown) => unknown)(dir, options);
 			}) as typeof fsDefault.readdirSync;
 			syncBuiltinESMExports();
@@ -150,9 +156,13 @@ describe("native supervisor channel", () => {
 				assert.equal(tick, undefined, "finished descendants stop polling on every platform");
 				assert.equal(scans, scansBeforeIdle);
 			} finally {
-				channel.dispose();
-				fsDefault.readdirSync = readdir;
-				syncBuiltinESMExports();
+				try {
+					channel.dispose();
+				} finally {
+					enforceScopedReads = false;
+					fsDefault.readdirSync = readdir;
+					syncBuiltinESMExports();
+				}
 			}
 		});
 	}

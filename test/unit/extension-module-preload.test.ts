@@ -41,9 +41,15 @@ it("loads the executor and Fleet within seconds of a session starting, not at se
 	assert.equal(executorLoaded(), false, "session_start must not load the executor on Pi's startup path");
 	assert.equal(fleetLoaded(), false, "session_start must not load Fleet on Pi's startup path");
 
-	t.mock.timers.tick(5_000);
-	assert.equal(executorLoaded(), true, "the executor loads within seconds of the session starting");
-	assert.equal(fleetLoaded(), true, "Fleet loads within seconds of the session starting");
-
-	for (const handler of handlers.get("session_shutdown") ?? []) await handler({ reason: "quit" }, ctx);
+	try {
+		t.mock.timers.tick(5_000);
+		const deadline = Date.now() + 5_000;
+		while ((!executorLoaded() || !fleetLoaded()) && Date.now() < deadline) {
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		}
+		assert.equal(executorLoaded(), true, "the executor loads within seconds of the session starting");
+		assert.equal(fleetLoaded(), true, "Fleet loads within seconds of the session starting");
+	} finally {
+		for (const handler of handlers.get("session_shutdown") ?? []) await handler({ reason: "quit" }, ctx);
+	}
 });

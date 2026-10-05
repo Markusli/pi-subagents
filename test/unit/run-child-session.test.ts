@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { it } from "node:test";
+import { after, it } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { runSync } from "../../src/runs/foreground/execution.ts";
 import { makeAgentConfigs } from "../support/helpers.ts";
@@ -12,6 +12,8 @@ const launch = { session: {
 	hooks: [], noSkills: true, noContextFiles: true,
 	runtime: { fanoutChild: false, fast: false, depth: 1, waitTool: { enabled: false } },
 } } as InProcessChildLaunch;
+const testKeepAlive = setInterval(() => {}, 1_000);
+after(() => clearInterval(testKeepAlive));
 
 // Without the abort backstop this run never settles, so bound the test instead of hanging the suite.
 it("settles a timed-out run whose session creation never returns, and contains late disposal rejection", { timeout: 10_000 }, async () => {

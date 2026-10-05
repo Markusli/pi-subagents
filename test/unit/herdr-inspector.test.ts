@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { PassThrough } from "node:stream";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { readHerdrInspectorBinding } from "../../src/inspectors/herdr/actions.ts";
 import { handleInspectorAction } from "../../src/inspectors/actions.ts";
 import { createHerdrInspectorPlugin } from "../../src/inspectors/herdr/plugin.ts";
@@ -20,6 +20,8 @@ import type { AsyncStatus, SubagentState } from "../../src/shared/types.ts";
 // no spaces/quotes of its own); pull it back out and decode it the same way
 // the inspector runner does, rather than pattern-matching on the raw text.
 const INSPECT_ALLOW_FLAGS = /--allow-steer['"]\s+['"]true['"]\s+['"]--allow-stop['"]\s+['"]true['"]/;
+const testKeepAlive = setInterval(() => {}, 1_000);
+after(() => clearInterval(testKeepAlive));
 
 function sessionRootsFromRunCommand(command: string): string[] {
 	const match = /--session-roots\S*\s+['"]?([A-Za-z0-9+/=]+)/.exec(command);

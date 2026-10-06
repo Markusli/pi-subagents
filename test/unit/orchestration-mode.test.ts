@@ -104,6 +104,10 @@ describe("orchestration mode", () => {
 		assert.match(prompt.systemPrompt, /keep bulk retrieval and raw evidence out of the persistent coordinator context/i);
 		assert.match(prompt.systemPrompt, /managed .*output.*outputMode/i);
 		assert.match(prompt.systemPrompt, /compact decision-relevant digest/i);
+		assert.match(prompt.systemPrompt, /native run lifecycle consistently/i);
+		assert.match(prompt.systemPrompt, /command\.status.*child-command state/i);
+		assert.match(prompt.systemPrompt, /command\.yield.*command\.cancel.*exact child tool call/i);
+		assert.match(prompt.systemPrompt, /resume.*original launch limits/i);
 
 		const guideInput: Record<string, unknown> = { action: "guide", topic: "workflows" };
 		assert.equal((await emit(h, "tool_call", { toolName: "subagent", input: guideInput }))[0], undefined);

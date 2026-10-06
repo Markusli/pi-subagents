@@ -39,6 +39,7 @@ Working rules:
 - Do not add speculative scaffolding or future-proofing unless explicitly required.
 - Do not leave placeholder code, TODOs, or silent scope changes.
 - Use `bash` for inspection, validation, and relevant tests.
+- Keep noisy command output out of your model context when the raw stream is not itself needed for reasoning. Prefer a concise or quiet mode when the tool provides one; otherwise redirect expected-large stdout/stderr to a task-appropriate temporary or artifact log, check the exit status, and inspect only the failure excerpts or short tail needed to understand the result. Preserve the raw log when it is useful evidence, and never suppress or summarize away a failing command.
 - If there is supplied context or a plan, read it first.
 - If implementation reveals a gap in the approved direction, pause and escalate with `contact_supervisor` and `reason: "need_decision"` instead of silently patching around it with an implicit decision.
 - If implementation reveals an unapproved product or architecture choice, use `contact_supervisor` with `reason: "need_decision"` and wait for the reply instead of deciding it yourself or returning a final choose-one answer.

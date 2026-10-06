@@ -345,6 +345,7 @@ export function installSingleExecutionHooks() {
 		discoverAgentsForCwd?: (cwd: string, preferredModelProvider?: string) => typeof agents,
 		childRuntime?: ChildRuntimeConfig,
 		sendMessage?: (message: unknown, options: unknown) => void,
+		discoverAgentResultForCwd?: (cwd: string, preferredModelProvider?: string) => { agents: typeof agents; modelScope?: import("../../src/runs/shared/model-scope.ts").ModelScopeConfig },
 	) {
 		return createSubagentExecutor!({
 			pi: { events: piEvents, getSessionName: () => undefined, ...(sendMessage ? { sendMessage } : {}) },
@@ -363,7 +364,9 @@ export function installSingleExecutionHooks() {
 			tempArtifactsDir: tempDir,
 			getSubagentSessionRoot: () => path.join(tempDir, ".pi/subagents", "sessions"),
 			expandTilde: (value: string) => value,
-			discoverAgents: (cwd: string, _scope: unknown, preferredModelProvider?: string) => ({ agents: discoverAgentsForCwd ? discoverAgentsForCwd(cwd, preferredModelProvider) : agents }),
+			discoverAgents: (cwd: string, _scope: unknown, preferredModelProvider?: string) => discoverAgentResultForCwd
+				? discoverAgentResultForCwd(cwd, preferredModelProvider)
+				: { agents: discoverAgentsForCwd ? discoverAgentsForCwd(cwd, preferredModelProvider) : agents },
 			allowMutatingManagementActions,
 			...(handleScheduledRunAction ? { handleScheduledRunAction } : {}),
 		});

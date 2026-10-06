@@ -1044,7 +1044,10 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		startResultWatcher();
 		logSlowPhase("result-watcher-start", phaseStartedAt);
 		phaseStartedAt = Date.now();
-		primeExistingResults({ triggerTurn: !recovering });
+		// An eligible terminal result discovered during startup/reload/resume is
+		// still completion work owed to this parent. Let the existing ownership
+		// and dedupe gates decide eligibility, then wake the parent normally.
+		primeExistingResults();
 		logSlowPhase("result-prime", phaseStartedAt);
 		fleetStatus?.setContext(ctx);
 	};

@@ -2215,6 +2215,13 @@ async function resumeAsyncRun(input: {
 	if (acceptanceErrors.length > 0) {
 		return { content: [{ type: "text", text: `Cannot resume: ${acceptanceErrors.join(" ")}` }], isError: true, details: { mode: "management", results: [] } };
 	}
+	const resumeTimeout = resolveForegroundTimeout(
+		input.params,
+		input.absoluteDeadlineAt === undefined ? agentConfig.defaultTimeoutMs : undefined,
+	);
+	if (resumeTimeout.error) {
+		return { content: [{ type: "text", text: `Cannot resume: ${resumeTimeout.error}` }], isError: true, details: { mode: "management", results: [] } };
+	}
 	const runId = randomUUID();
 	const topLevelResume = depth === 0 && !inheritedNestedRoute(input.deps) && !input.params.workflowParentRunId;
 	let activeAsyncCapacity: ActiveAsyncCapacityHandle | undefined;
@@ -2258,7 +2265,9 @@ async function resumeAsyncRun(input: {
 			currentModelProvider: parentModel?.provider,
 			currentModel: parentModel,
 			scopedModelIds: scopedModelIdsFromContext(input.ctx),
-			modelScope,
+			// This child already passed launch-time model admission. Resume the
+			// persisted model contract instead of reinterpreting it through current
+			// modelScope. Fresh attach-chain steps keep the current scope above.
 			// Absence in the retained contract is meaningful; never acquire current aliases.
 			modelResponseAliases: recoveryDescriptor ? recoveryDescriptor.modelResponseAliases : foregroundContract?.modelResponseAliases,
 			interactive: input.ctx.hasUI,
@@ -2315,7 +2324,7 @@ async function resumeAsyncRun(input: {
 		...(outputSchema ? { structuredOutputSchema: outputSchema } : {}),
 		...(recoveryDescriptor?.skills ? { skills: [...recoveryDescriptor.skills] } : {}),
 		...(acceptance !== undefined ? { acceptance } : {}),
-		...(input.params.timeoutMs !== undefined ? { timeoutMs: input.params.timeoutMs } : {}),
+		...(resumeTimeout.timeoutMs !== undefined ? { timeoutMs: resumeTimeout.timeoutMs } : {}),
 		...(input.absoluteDeadlineAt !== undefined ? { absoluteDeadlineAt: input.absoluteDeadlineAt } : {}),
 		...(input.params.toolBudget !== undefined ? { toolBudget: input.params.toolBudget } : {}),
 		// Recovery descriptors, remembered foreground runs, and current workflow roots

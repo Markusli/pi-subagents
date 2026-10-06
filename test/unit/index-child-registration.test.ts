@@ -1297,6 +1297,68 @@ describe("subagent extension child mode", () => {
 		}
 	});
 
+	it("wakes the parent for an owned terminal result already present at startup, reload, and resume recovery", () => {
+		const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagents-recovery-result-wake-"));
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagents-recovery-results-"));
+		const configDir = path.join(agentDir, "extensions", "subagent");
+		fs.mkdirSync(configDir, { recursive: true });
+		fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ completionBatch: { enabled: false } }), "utf-8");
+		const script = String.raw`
+			import fs from "node:fs";
+			import registerSubagentExtension from "./index.ts";
+			import { currentCompletionOwnerId } from "./src/shared/completion-owner.ts";
+			import { RESULTS_DIR } from "./src/shared/types.ts";
+			import { resultFilePath, writeAsyncResultFile } from "./src/runs/background/result-files.ts";
+			const handlers = new Map();
+			const listeners = new Map();
+			const events = {
+				on(channel, handler) { let set = listeners.get(channel); if (!set) listeners.set(channel, set = new Set()); set.add(handler); return () => set.delete(handler); },
+				emit(channel, payload) { for (const handler of [...(listeners.get(channel) ?? [])]) handler(payload); },
+			};
+			const sent = [];
+			const userMessages = [];
+			const pi = new Proxy({
+				events,
+				on(channel, handler) { handlers.set(channel, [...(handlers.get(channel) ?? []), handler]); },
+				registerTool() {}, registerCommand() {}, registerShortcut() {}, registerMessageRenderer() {},
+				sendMessage(message, options) { sent.push({ message, options }); }, getSessionName() { return undefined; },
+				sendUserMessage(message, options) { userMessages.push({ message, options }); },
+			}, { get(target, prop) { return prop in target ? target[prop] : () => undefined; } });
+			const reason = process.env.TEST_RECOVERY_REASON;
+			if (!reason) throw new Error("TEST_RECOVERY_REASON is required");
+			const sessionId = "recovery-session-" + reason;
+			const sessionManager = { getSessionId() { return sessionId; }, getSessionFile() { return null; }, getEntries() { return []; } };
+			const ctx = { cwd: process.cwd(), isIdle() { return true; }, hasUI: false, ui: { setWidget() {}, requestRender() {}, theme: { fg(_name, text) { return text; }, bg(_name, text) { return text; }, bold(text) { return text; } } }, sessionManager, modelRegistry: { getAvailable() { return []; } } };
+			fs.mkdirSync(RESULTS_DIR, { recursive: true });
+			const resultId = "recovered-result-" + reason;
+			writeAsyncResultFile(resultFilePath(RESULTS_DIR, resultId), {
+				id: resultId, runId: resultId, agent: "worker", success: true, summary: "done", exitCode: 0,
+				timestamp: Date.now(), sessionId, completionOwnerId: currentCompletionOwnerId(),
+			});
+			registerSubagentExtension(pi);
+			for (const handler of handlers.get("session_start")) await handler({ reason }, ctx);
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			if (sent.length !== 1) throw new Error("expected one recovery wake, got " + sent.length);
+			if (sent[0].options?.triggerTurn !== false) throw new Error("recovered completion notice was not appended safely");
+			if (userMessages.length !== 1 || userMessages[0].message !== "Subagent updates above." || userMessages[0].options?.deliverAs !== "steer") {
+				throw new Error("recovered completion did not wake the idle parent through the normal prompt lifecycle");
+			}
+			for (const handler of handlers.get("session_shutdown")) await handler({ reason: "quit" });
+		`;
+
+		try {
+			for (const reason of ["startup", "reload", "resume"]) {
+				const env = parentToolEnv(agentDir);
+				env.PI_SUBAGENTS_TEMP_ROOT = path.join(tempRoot, reason);
+				env.TEST_RECOVERY_REASON = reason;
+				execFileSync(process.execPath, ["--experimental-strip-types", "--import", "./test/support/register-loader.mjs", "--input-type=module", "--eval", script], { cwd: projectRoot, env, stdio: "pipe" });
+			}
+		} finally {
+			fs.rmSync(agentDir, { recursive: true, force: true });
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	it("registers the main watchdog command and renderer in parent mode", () => {
 		const script = String.raw`
 			import registerSubagentExtension from "./index.ts";

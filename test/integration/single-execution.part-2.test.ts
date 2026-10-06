@@ -1915,6 +1915,51 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		});
 	});
 
+	it("resumes the persisted child model after current strict model scope changes", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
+		const agent = makeAgent("echo", { model: "b.ai/deepseek-v4.1-flash" });
+		let allowed = "b.ai/deepseek-v4.1-flash";
+		const executor = makeExecutor(
+			[agent], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), undefined, undefined, undefined,
+			() => ({
+				agents: [agent],
+				modelScope: { enforce: true, strict: true, allow: [allowed], agents: { echo: { allow: [allowed] } } },
+			}),
+		);
+		const ctx = makeMinimalCtx(tempDir);
+		ctx.modelRegistry.getAvailable = () => [
+			{ provider: "b.ai", id: "deepseek-v4.1-flash" },
+			{ provider: "router", id: "deepseek-v4.1-flash" },
+		];
+
+		mockPi.onCall({ output: "first" });
+		const firstResult = await executor.execute(
+			"model-scope-resume-first",
+			{ async: false, workflowScript: `return runs.run("first", { agent: "echo", task: "First", acceptance: false, output: false });` },
+			new AbortController().signal, undefined, ctx,
+		);
+		assert.equal(firstResult.isError, undefined, firstResult.content[0]?.text ?? "first launch failed");
+		const first = firstResult.details.workflow?.value as { runId?: string };
+		assert.ok(first.runId);
+
+		allowed = "router/deepseek-v4.1-flash";
+		mockPi.onCall({ output: "resumed" });
+		const resumedResult = await executor.execute(
+			"model-scope-resume-second",
+			{ async: false, workflowScript: `return runs.run("resumed", { resume: ${JSON.stringify(first.runId)}, task: "Resume", acceptance: false, output: false });` },
+			new AbortController().signal, undefined, ctx,
+		);
+		assert.equal(resumedResult.isError, undefined, resumedResult.content[0]?.text ?? "resume failed");
+		assert.ok(readCallArgs().includes("b.ai/deepseek-v4.1-flash"));
+
+		const freshResult = await executor.execute(
+			"model-scope-fresh-rejected",
+			{ async: false, agent: "echo", task: "Fresh", acceptance: false },
+			new AbortController().signal, undefined, ctx,
+		);
+		assert.equal(freshResult.isError, true);
+		assert.match(freshResult.content[0]?.text ?? "", /outside the configured subagent model scope/u);
+	});
+
 	it("retains inherited and disabled discovered schemas across definition changes", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
 		const agentPath = path.join(tempDir, ".pi", "agents", "typed.md");
 		fs.mkdirSync(path.dirname(agentPath), { recursive: true });
@@ -4052,6 +4097,50 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		assert.match(result.content[0]?.text ?? "", /Async:/);
 		assert.equal(typeof result.details?.asyncId, "string");
 		assert.equal(result.details?.timeoutMs, 2_000);
+	});
+
+	it("applies an agent default timeout when reviving a child", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
+		const executor = makeExecutor([makeAgent("echo", { defaultTimeoutMs: 75 })]);
+		const ctx = makeMinimalCtx(tempDir);
+		mockPi.onCall({ output: "first" });
+		const firstResult = await executor.execute(
+			"resume-default-timeout-first",
+			{ async: false, workflowScript: `return runs.run("first", { agent: "echo", task: "First", acceptance: false, output: false });` },
+			new AbortController().signal, undefined, ctx,
+		);
+		assert.equal(firstResult.isError, undefined, firstResult.content[0]?.text ?? "first launch failed");
+		const first = firstResult.details.workflow?.value as { runId?: string };
+		assert.ok(first.runId);
+
+		mockPi.onCall({ output: "too late", delay: 250 });
+		const resumedResult = await executor.execute(
+			"resume-default-timeout-second",
+			{ async: false, workflowScript: `return runs.run("resumed", { resume: ${JSON.stringify(first.runId)}, task: "Resume", acceptance: false, output: false });` },
+			new AbortController().signal, undefined, ctx,
+		);
+		assert.equal(resumedResult.isError, true);
+		assert.match(resumedResult.content[0]?.text ?? "", /timed out/u);
+	});
+
+	it("lets explicit maxRuntimeMs override an agent default timeout when reviving a child", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
+		const executor = makeExecutor([makeAgent("echo", { defaultTimeoutMs: 75 })]);
+		const ctx = makeMinimalCtx(tempDir);
+		mockPi.onCall({ output: "first" });
+		const firstResult = await executor.execute(
+			"resume-max-runtime-first",
+			{ async: false, workflowScript: `return runs.run("first", { agent: "echo", task: "First", acceptance: false, output: false });` },
+			new AbortController().signal, undefined, ctx,
+		);
+		const first = firstResult.details.workflow?.value as { runId?: string };
+		assert.ok(first.runId);
+
+		mockPi.onCall({ output: "resumed", delay: 250 });
+		const resumedResult = await executor.execute(
+			"resume-max-runtime-second",
+			{ action: "resume", id: first.runId, message: "Resume", maxRuntimeMs: 500 },
+			new AbortController().signal, undefined, ctx,
+		);
+		assert.equal(resumedResult.isError, undefined, resumedResult.content[0]?.text ?? "resume failed");
 	});
 
 	it("applies agent acceptance defaults and lets explicit calls override them", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {

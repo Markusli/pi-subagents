@@ -99,6 +99,11 @@ describe("orchestration mode", () => {
 		assert.match(prompt.systemPrompt, /compile the user's prose contract into the existing Pi primitives/i);
 		assert.match(prompt.systemPrompt, /reuse the same mission across continuation\/review runs/i);
 		assert.match(prompt.systemPrompt, /do not replace a failed workflow with an ad-hoc sequence of direct children/i);
+		assert.match(prompt.systemPrompt, /action: "list", capabilities: true/i);
+		assert.match(prompt.systemPrompt, /choose a suitable role or report the routing blocker/i);
+		assert.match(prompt.systemPrompt, /keep bulk retrieval and raw evidence out of the persistent coordinator context/i);
+		assert.match(prompt.systemPrompt, /managed .*output.*outputMode/i);
+		assert.match(prompt.systemPrompt, /compact decision-relevant digest/i);
 
 		const guideInput: Record<string, unknown> = { action: "guide", topic: "workflows" };
 		assert.equal((await emit(h, "tool_call", { toolName: "subagent", input: guideInput }))[0], undefined);

@@ -135,6 +135,7 @@ const MissionLaunchOverride = Type.Unsafe({
 	anyOf: [
 		{ type: "object", additionalProperties: true },
 		{ type: "boolean" },
+		{ type: "string", pattern: "^\\s*\\{[\\s\\S]*\\}\\s*$" },
 	],
 });
 const MissionUpdateOverride = Type.Unsafe({ type: "object", additionalProperties: true });
@@ -205,7 +206,7 @@ const SubagentParamProperties = {
 	overlap: Type.Optional(Type.String({ enum: ["skip"] })),
 	catchUp: Type.Optional(Type.String({ enum: ["none", "latest"], description: "Missed; default latest." })),
 	missionId: Type.Optional(Type.String({ description: "Existing mission; read guide missions." })),
-	mission: Type.Optional(Type.Unsafe({ ...MissionLaunchOverride, description: "false disables. Object: exactly one non-empty title or summary; goal only true, requires budget.tokens; autoDrive continues idle goals." })),
+	mission: Type.Optional(Type.Unsafe({ ...MissionLaunchOverride, description: "false disables. Object or object-JSON string: exactly one non-empty title or summary; goal only true, requires budget.tokens. JSON strings: mission.create only." })),
 	missionUpdate: Type.Optional(Type.Unsafe({ ...MissionUpdateOverride, description: "Mission patch; read guide missions." })),
 	missionStatus: Type.Optional(Type.String()),
 	missionScope: Type.Optional(Type.String({ description: "project (default) or global pointer index." })),

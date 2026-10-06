@@ -683,6 +683,9 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			const expandKey = keyText("app.tools.expand");
 			text += `\n  ${theme.fg("dim", `${expandKey} full notification`)}`;
 		}
+		for (const warning of details.acceptanceWarnings ?? []) {
+			text += `\n  ${theme.fg("warning", `⚠ acceptance rejected (${warning.agent}): ${warning.message.replace(/\n/g, "\\n")}`)}`;
+		}
 		if (details.workflowRunId) {
 			text += `\n  ${theme.fg("muted", `workflow: ${details.workflowRunId}`)}`;
 		}

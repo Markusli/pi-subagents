@@ -3,14 +3,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { validateMissionLaunch } from "../../src/missions/actions.ts";
+import { validateMissionLaunch, handleMissionAction } from "../../src/missions/actions.ts";
 import {
 	attachMissionToLaunchResult,
 	prepareMissionLaunch,
 	readMissionBinding,
 	syncMissionFromAsyncCompletion,
 } from "../../src/missions/lifecycle.ts";
-import { readMission } from "../../src/missions/store.ts";
+import { listMissions, readMission, resolveMissionStoreLocation } from "../../src/missions/store.ts";
 import { PROMPT_REDACTED } from "../../src/shared/utils.ts";
 
 function projectFixture() {
@@ -62,6 +62,42 @@ describe("mission launch lifecycle", () => {
 			});
 			assert.ok(binding);
 			assert.deepEqual(readMission(binding.location, binding.missionId).goal, { status: "active", autoDrive: true });
+		} finally {
+			fs.rmSync(test.root, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps string mission values object-only on ordinary launches", () => {
+		const test = projectFixture();
+		try {
+			assert.throws(() => prepareMissionLaunch({
+				params: { mission: JSON.stringify({ title: "String mission" }), task: "Do work" },
+				projectRoot: test.projectRoot,
+				config: test.missionConfig,
+			}), /mission must be an object/);
+		} finally {
+			fs.rmSync(test.root, { recursive: true, force: true });
+		}
+	});
+
+	it("reuses the missionId returned by mission.create on a later launch", () => {
+		const test = projectFixture();
+		try {
+			const ctx = { cwd: test.projectRoot, agentDir: test.root, config: test.missionConfig, currentSessionId: "session-1" };
+			const created = handleMissionAction("mission.create", { mission: { title: "Continuity mission" } }, ctx);
+			const missionId = created.details?.missionId;
+			assert.ok(missionId);
+			assert.equal(listMissions(resolveMissionStoreLocation({ projectRoot: test.projectRoot, config: test.missionConfig })).records.length, 1);
+
+			const binding = prepareMissionLaunch({
+				params: { missionId, task: "Continue the work" },
+				projectRoot: test.projectRoot,
+				config: test.missionConfig,
+			});
+			assert.equal(binding?.missionId, missionId);
+			assert.equal(binding?.autoCreated, false);
+			assert.equal(readMission(binding!.location, missionId).status, "active");
+			assert.equal(listMissions(binding!.location).records.length, 1, "reusing missionId must not create another mission record");
 		} finally {
 			fs.rmSync(test.root, { recursive: true, force: true });
 		}

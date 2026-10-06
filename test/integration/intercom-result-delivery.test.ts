@@ -1817,10 +1817,12 @@ describe("intercom result delivery cutover", { skip: !available ? "executor not 
 
 		const completion = bus.emitted.find((event) => event.channel === SUBAGENT_FOREGROUND_COMPLETE_EVENT);
 		assert.ok(completion);
-		const payload = completion.payload as { success?: boolean; summary?: string };
+		const payload = completion.payload as { success?: boolean; summary?: string; results?: Array<{ acceptance?: { status?: string; explicit?: boolean } }> };
 		assert.equal(payload.success, false);
 		assert.match(payload.summary ?? "", /Acceptance rejected/);
 		assert.match(payload.summary ?? "", /final answer with rejected acceptance evidence/);
+		assert.equal(payload.results?.[0]?.acceptance?.status, "rejected");
+		assert.equal(payload.results?.[0]?.acceptance?.explicit, true);
 
 		const status = await executor.execute(
 			"foreground-detached-failed-status",
@@ -1831,6 +1833,67 @@ describe("intercom result delivery cutover", { skip: !available ? "executor not 
 		);
 		assert.match(status.content[0]?.text ?? "", /acceptance: rejected/);
 		assert.match(status.content[0]?.text ?? "", /error: Acceptance rejected/);
+	});
+
+	it("keeps inferred detached acceptance rejection orthogonal to foreground execution status", async () => {
+		const malformedReport = [
+			"final answer with malformed inferred acceptance evidence",
+			"```acceptance-report",
+			"{ not json",
+		].join("\n");
+		mockPi.onCall({
+			steps: [
+				{ jsonl: [events.toolStart("contact_supervisor", { reason: "need_decision", message: "Need a decision" })] },
+				{ delay: 75, jsonl: [events.assistantMessage(malformedReport)] },
+			],
+		});
+		const { executor, events: bus, state } = makeExecutor({ agents: [makeAgent("a", { systemPrompt: "Intercom orchestration channel:" })] });
+		let detachEmitted = false;
+		const original = await executor.execute(
+			"foreground-detached-inferred-rejection",
+			{ agent: "a", task: "ask supervisor" },
+			new AbortController().signal,
+			(update: { details?: { progress?: Array<{ currentTool?: string }> } }) => {
+				if (detachEmitted || !update.details?.progress?.some((entry) => entry.currentTool === "contact_supervisor")) return;
+				detachEmitted = true;
+				bus.emit(INTERCOM_DETACH_REQUEST_EVENT, { requestId: "single-detached-inferred-rejection" });
+			},
+			makeMinimalCtx(tempDir),
+		);
+		const runId = original.details?.runId;
+		assert.ok(runId);
+		assert.equal(original.details?.results?.[0]?.acceptance?.status, "pending");
+
+		const waited = await waitForSubagents({ id: runId, timeoutMs: 5000 }, undefined, {
+			state: state as never,
+			events: bus,
+			asyncDirRoot: path.join(tempDir, "async-runs"),
+			resultsDir: path.join(tempDir, "results"),
+		});
+		assert.equal(waited.isError, undefined);
+		assert.match(waited.content[0]?.text ?? "", /1 completed/);
+
+		const completion = bus.emitted.find((event) => event.channel === SUBAGENT_FOREGROUND_COMPLETE_EVENT);
+		assert.ok(completion);
+		const payload = completion.payload as {
+			success?: boolean;
+			summary?: string;
+			results?: Array<{ acceptance?: { status?: string; explicit?: boolean } }>;
+		};
+		assert.equal(payload.success, true, "inferred acceptance rejection must not become a lifecycle failure");
+		assert.equal(payload.results?.[0]?.acceptance?.status, "rejected");
+		assert.equal(payload.results?.[0]?.acceptance?.explicit, false);
+		assert.match(payload.summary ?? "", /final answer with malformed inferred acceptance evidence/);
+
+		const status = await executor.execute(
+			"foreground-detached-inferred-rejection-status",
+			{ action: "status", id: runId },
+			new AbortController().signal,
+			undefined,
+			makeMinimalCtx(tempDir),
+		);
+		assert.match(status.content[0]?.text ?? "", /completed, exit 0/);
+		assert.match(status.content[0]?.text ?? "", /acceptance: rejected/);
 	});
 
 

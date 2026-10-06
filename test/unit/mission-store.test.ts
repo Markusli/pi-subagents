@@ -498,4 +498,24 @@ describe("mission store", () => {
 			fs.rmSync(test.root, { recursive: true, force: true });
 		}
 	});
+
+	it("normalizes an object-JSON mission string only for mission.create", () => {
+		const test = fixture();
+		try {
+			const ctx = { cwd: test.projectRoot, agentDir: test.agentDir, currentSessionId: "session-1" };
+			const created = handleMissionAction("mission.create", {
+				mission: JSON.stringify({ title: "String mission", objective: "Accept the observed JSON string boundary" }),
+			}, ctx);
+			assert.equal(created.details?.mission?.title, "String mission");
+			assert.equal(created.details?.mission?.objective, "Accept the observed JSON string boundary");
+			assert.match(created.content[0]?.type === "text" ? created.content[0].text : "", new RegExp(`Reuse missionId ${created.details?.missionId}`));
+
+			assert.throws(() => handleMissionAction("mission.create", { mission: "{ not json" }, ctx), /mission JSON string must encode an object/);
+			assert.throws(() => handleMissionAction("mission.create", { mission: { title: " " } }, ctx), /non-empty string/);
+			assert.throws(() => handleMissionAction("mission.create", { mission: 42 as never }, ctx), /mission must be an object/);
+			assert.equal(listMissions(test.location).records.length, 1);
+		} finally {
+			fs.rmSync(test.root, { recursive: true, force: true });
+		}
+	});
 });

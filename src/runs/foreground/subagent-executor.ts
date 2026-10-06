@@ -883,7 +883,6 @@ function updateRememberedForegroundChild(state: SubagentState, input: { runId: s
 	run.updatedAt = updatedAt;
 	const terminalStatus = resolveSubagentResultStatus(omitUndefinedProperties({
 		exitCode: input.result.exitCode,
-		...(input.result.acceptance?.status === "rejected" ? { success: false } : {}),
 		interrupted: input.result.interrupted,
 		detached: false,
 		processSignal: input.result.processSignal,
@@ -952,6 +951,14 @@ function updateRememberedForegroundChild(state: SubagentState, input: { runId: s
 		sessionFile: input.result.sessionFile,
 		sessionId: input.sessionId,
 		taskIndex: input.index,
+		...(input.result.acceptance ? {
+			results: [{
+				agent: input.result.agent,
+				success,
+				exitCode: input.result.exitCode,
+				acceptance: input.result.acceptance,
+			}],
+		} : {}),
 	});
 }
 
@@ -2465,7 +2472,6 @@ function createForegroundControlNotifier(data: Pick<ExecutionContextData, "contr
 export function foregroundResultIntercomStatus(result: SingleResult): ReturnType<typeof resolveSubagentResultStatus> {
 	return resolveSubagentResultStatus(omitUndefinedProperties({
 		exitCode: result.exitCode,
-		...(result.acceptance?.status === "rejected" ? { success: false } : {}),
 		interrupted: result.interrupted,
 		detached: result.detached,
 		processSignal: result.processSignal,

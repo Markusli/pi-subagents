@@ -17,7 +17,8 @@ import {
 	createCompletionBatcher,
 	resolveCompletionBatchConfig,
 } from "./completion-batcher.ts";
-import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_FOREGROUND_COMPLETE_EVENT, type ChildWatchdogProgress, type ChildWatchdogWarningSummary, type ParallelHandoffReference, type ScheduleOrigin, type SubagentState } from "../../shared/types.ts";
+import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_FOREGROUND_COMPLETE_EVENT, type AcceptanceLedger, type ChildWatchdogProgress, type ChildWatchdogWarningSummary, type ParallelHandoffReference, type ScheduleOrigin, type SubagentState } from "../../shared/types.ts";
+import { acceptanceFailureMessage } from "../shared/acceptance.ts";
 import { safeTerminalText } from "../../shared/display-text.ts";
 import type { ParentWake } from "../../shared/parent-wake.ts";
 import { resolveSubagentResultStatus } from "../../intercom/result-intercom.ts";
@@ -43,6 +44,11 @@ export interface SubagentNotifyChildOutput {
 
 export type SubagentNotifyWatchdogBlocker = Pick<ChildWatchdogWarningSummary, "summary" | "addressed" | "stalemate"> & { agent: string };
 
+export interface SubagentNotifyAcceptanceWarning {
+	agent: string;
+	message: string;
+}
+
 export interface SubagentNotifyDetails {
 	workflowReceiptPath?: string;
 	asyncDir?: string;
@@ -62,6 +68,8 @@ export interface SubagentNotifyDetails {
 	/** Present when a durable schedule launched the run. */
 	scheduleOrigin?: ScheduleOrigin;
 	watchdogBlockers?: SubagentNotifyWatchdogBlocker[];
+	/** Orthogonal evidence warning; a rejected ledger does not change execution/lifecycle status. */
+	acceptanceWarnings?: SubagentNotifyAcceptanceWarning[];
 }
 
 export interface IncrementalChildCompletion {
@@ -114,6 +122,7 @@ export interface CompletionNotification {
 		timedOut?: boolean;
 		stopped?: boolean;
 		turnBudgetExceeded?: boolean;
+		acceptance?: AcceptanceLedger;
 		watchdog?: ChildWatchdogProgress;
 	}>;
 	watchdog?: ChildWatchdogProgress;
@@ -334,6 +343,8 @@ function formatCorrelationLines(details: SubagentNotifyDetails): string[] {
 }
 
 const WATCHDOG_BLOCKERS_HEADING = "Watchdog blockers:";
+const ACCEPTANCE_WARNINGS_HEADING = "Acceptance rejected:";
+const ACCEPTANCE_WARNING_HEADER_PREFIX = "Acceptance warning: ";
 
 function formatWatchdogBlockerLines(details: SubagentNotifyDetails): string[] {
 	if (!details.watchdogBlockers?.length) return [];
@@ -351,10 +362,36 @@ function parseWatchdogBlockerLines(lines: string[]): SubagentNotifyWatchdogBlock
 	return blockers;
 }
 
+// Acceptance messages can contain newlines; escape them so a message body can never
+// masquerade as workflow/session metadata in the parsed notice.
+function formatAcceptanceWarningLines(details: SubagentNotifyDetails): string[] {
+	if (!details.acceptanceWarnings?.length) return [];
+	return [ACCEPTANCE_WARNINGS_HEADING, ...details.acceptanceWarnings.map((warning) => `- ${boundedSafeText(warning.agent, 256)}: ${boundedSafeText(warning.message)}`)];
+}
+
+function formatAcceptanceWarningHeaderLines(details: SubagentNotifyDetails): string[] {
+	return details.acceptanceWarnings?.map((warning) => `${ACCEPTANCE_WARNING_HEADER_PREFIX}${JSON.stringify({
+		agent: boundedSafeText(warning.agent, 256),
+		message: boundedSafeText(warning.message),
+	})}`) ?? [];
+}
+
+function parseAcceptanceWarningHeaderLine(line: string): SubagentNotifyAcceptanceWarning | undefined {
+	if (!line.startsWith(ACCEPTANCE_WARNING_HEADER_PREFIX)) return undefined;
+	try {
+		const parsed = JSON.parse(line.slice(ACCEPTANCE_WARNING_HEADER_PREFIX.length)) as Record<string, unknown>;
+		if (typeof parsed.agent !== "string" || typeof parsed.message !== "string") return undefined;
+		return { agent: parsed.agent, message: parsed.message };
+	} catch {
+		return undefined;
+	}
+}
+
 export function formatSingleCompletion(details: SubagentNotifyDetails): string {
 	const sessionLine = formatSessionLine(details);
 	const correlationLines = formatCorrelationLines(details);
 	const watchdogLines = formatWatchdogBlockerLines(details);
+	const acceptanceHeaderLines = formatAcceptanceWarningHeaderLines(details);
 	const taskKind = details.source === "foreground" ? "Detached foreground task" : "Background task";
 	const scheduleLine = details.scheduleOrigin
 		? `Scheduled run from **${details.scheduleOrigin.name ?? details.scheduleOrigin.id}** (schedule ${details.scheduleOrigin.id}).`
@@ -362,6 +399,7 @@ export function formatSingleCompletion(details: SubagentNotifyDetails): string {
 	return [
 		`${taskKind} ${details.status}: **${details.agent}**${details.taskInfo ?? ""}`,
 		details.workflowReceiptPath ? `Workflow receipt: ${details.workflowReceiptPath}` : undefined,
+		...acceptanceHeaderLines,
 		"",
 		scheduleLine,
 		scheduleLine ? "" : undefined,
@@ -416,11 +454,22 @@ export function parseSubagentNotifyContent(content: string): SubagentNotifyDetai
 	const lines = content.split("\n");
 	const match = (lines[0] ?? "").match(/^(Background task|Detached foreground task) (completed|failed|paused|stopped): \*\*(.+?)\*\*(?:\s+(\([^)]*\)))?$/);
 	if (!match) return undefined;
-	// Only the header slot before the blank separator can carry a receipt.
-	// Identical lines anywhere in model output remain preview text.
-	const receiptHeader = lines[1]?.startsWith("Workflow receipt: ") && lines[2] === "";
-	const workflowReceiptPath = receiptHeader ? lines[1]!.slice("Workflow receipt: ".length) : undefined;
-	let body = lines.slice(receiptHeader ? 3 : 2);
+	// Only formatter-owned header lines before the first blank separator are typed
+	// metadata. Identical text anywhere in model output remains preview text.
+	const headerEnd = lines.indexOf("", 1);
+	if (headerEnd < 0) return undefined;
+	const headerLines = lines.slice(1, headerEnd);
+	let workflowReceiptPath: string | undefined;
+	const acceptanceWarnings: SubagentNotifyAcceptanceWarning[] = [];
+	for (const line of headerLines) {
+		if (!workflowReceiptPath && line.startsWith("Workflow receipt: ")) {
+			workflowReceiptPath = line.slice("Workflow receipt: ".length);
+			continue;
+		}
+		const warning = parseAcceptanceWarningHeaderLine(line);
+		if (warning) acceptanceWarnings.push(warning);
+	}
+	let body = lines.slice(headerEnd + 1);
 	// Restore the schedule origin so a re-rendered notice keeps its attribution and
 	// does not fold the line into the result preview.
 	const scheduleMatch = (body[0] ?? "").match(/^Scheduled run from \*\*(.+?)\*\* \(schedule (.+?)\)\.$/);
@@ -483,6 +532,7 @@ export function parseSubagentNotifyContent(content: string): SubagentNotifyDetai
 		...(childRuns?.length ? { childRuns } : {}),
 		...(reconciledFromDetachedChild ? { reconciledFromDetachedChild } : {}),
 		...(watchdogBlockers.length ? { watchdogBlockers } : {}),
+		...(acceptanceWarnings.length ? { acceptanceWarnings } : {}),
 		...(sessionLabel && sessionValue ? { sessionLabel, sessionValue } : {}),
 	};
 }
@@ -498,6 +548,7 @@ export function formatGroupedCompletion(details: SubagentNotifyDetails[]): strin
 		if (detail.workflowReceiptPath) blocks.push(`Workflow receipt: ${detail.workflowReceiptPath}`);
 		blocks.push(formatResultPreview(detail));
 		blocks.push(...formatWatchdogBlockerLines(detail));
+		blocks.push(...formatAcceptanceWarningLines(detail));
 		if (detail.handoffPath) blocks.push(`Parallel handoff: ${detail.handoffPath}`);
 		blocks.push(...formatCorrelationLines(detail));
 		if (sessionLine) blocks.push(sessionLine);
@@ -750,6 +801,16 @@ export function buildCompletionDetails(result: CompletionNotification): Subagent
 	};
 	collectWatchdogFindings(agent, result.watchdog);
 	for (const child of result.results ?? []) collectWatchdogFindings(typeof child.agent === "string" ? child.agent : agent, child.watchdog);
+	// Acceptance rejection is an evidence warning, not a lifecycle outcome: it must
+	// stay visible even when the child completed cleanly with exit code 0. Keep it out
+	// of resultPreview so a message body can never spoof parsed metadata.
+	const acceptanceWarnings: SubagentNotifyAcceptanceWarning[] = (result.results ?? []).flatMap((child) => {
+		const ledger = child.acceptance;
+		if (!ledger || ledger.status !== "rejected") return [];
+		const message = acceptanceFailureMessage(ledger) ?? "Acceptance rejected.";
+		const owner = typeof child.agent === "string" && child.agent ? child.agent : agent;
+		return [{ agent: owner, message }];
+	});
 	const session =
 		result.shareUrl
 			? { label: "Session", value: result.shareUrl }
@@ -778,6 +839,7 @@ export function buildCompletionDetails(result: CompletionNotification): Subagent
 		...(childOutputs?.length ? { childOutputs } : {}),
 		...(reconciledFromDetachedChild ? { reconciledFromDetachedChild } : {}),
 		...(watchdogBlockers.length ? { watchdogBlockers } : {}),
+		...(acceptanceWarnings.length ? { acceptanceWarnings } : {}),
 		...(session ? { sessionLabel: session.label, sessionValue: session.value } : {}),
 	};
 }

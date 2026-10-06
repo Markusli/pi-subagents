@@ -137,6 +137,20 @@ export function validateMissionLaunch(value: unknown): MissionLaunchInput {
 	};
 }
 
+function normalizeMissionCreateInput(value: unknown): unknown {
+	if (typeof value !== "string") return value;
+	const trimmed = value.trim();
+	if (!trimmed.startsWith("{")) return value;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(trimmed);
+	} catch (error) {
+		throw new Error(`mission JSON string must encode an object: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("mission JSON string must encode an object");
+	return parsed;
+}
+
 function validateArtifact(value: unknown, index: number): MissionArtifact {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`missionUpdate.artifacts[${index}] must be an object`);
 	const input = value as Record<string, unknown>;
@@ -345,7 +359,7 @@ export function handleMissionAction(
 		...(ctx.agentDir ? { agentDir: ctx.agentDir } : {}),
 	});
 	if (action === "mission.create") {
-		const mission = validateMissionLaunch(params.mission);
+		const mission = validateMissionLaunch(normalizeMissionCreateInput(params.mission));
 		const record = createMission(location, {
 			title: mission.title,
 			objective: mission.objective ?? mission.title,
@@ -356,7 +370,7 @@ export function handleMissionAction(
 			...(mission.labels ? { labels: mission.labels } : {}),
 			...(ctx.currentSessionId ? { ownerSessionId: ctx.currentSessionId } : {}),
 		}, new Date(), ctx.config?.retainTerminal);
-		return textResult(`Created mission ${record.id}: ${record.title}`, { mode: "management", results: [], missionId: record.id, missionPath: pathFor(record.id), mission: record });
+		return textResult(`Created mission ${record.id}: ${record.title}\nReuse missionId ${record.id} on later launches for the same work.`, { mode: "management", results: [], missionId: record.id, missionPath: pathFor(record.id), mission: record });
 	}
 	if (action === "mission.list") {
 		if (params.missionScope !== undefined && params.missionScope !== "project" && params.missionScope !== "global") {

@@ -614,6 +614,12 @@ describe("SubagentParams schema", { skip: !schemasAvailable ? "typebox not avail
 		for (const acceptance of ["cheked", "none", "verified", "not-json", '[{"level":"checked"}]']) {
 			assert.equal(validator.Check({ agent: "worker", task: "Fix", acceptance }), false, `${JSON.stringify(acceptance)} acceptance should not validate`);
 		}
+		for (const mission of ['{"title":"x"}', '  \n {"title":"x"} \n']) {
+			assert.equal(validator.Check({ action: "mission.create", mission }), true, `${JSON.stringify(mission)} mission string should validate`);
+		}
+		for (const mission of ["not-json", '[{"title":"x"}]', '{"title":"x"} trailing']) {
+			assert.equal(validator.Check({ action: "mission.create", mission }), false, `${JSON.stringify(mission)} mission string should not validate`);
+		}
 		const validValues = [
 			{ skill: "review" },
 			{ workflow: true },

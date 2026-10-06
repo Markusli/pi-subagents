@@ -604,18 +604,22 @@ describe("workflow chat progress rendering", () => {
 	it("suppresses only successful routine child result intercom for live-card workflows", () => {
 		const completed = { agent: "delegate", exitCode: 0, outputState: "present" } as SingleResult;
 		const failed = { agent: "delegate", exitCode: 1, outputState: "present" } as SingleResult;
-		const rejected = { agent: "delegate", exitCode: 0, acceptance: { status: "rejected" }, outputState: "present" } as SingleResult;
+		const explicitRejected = { agent: "delegate", exitCode: 1, acceptance: { status: "rejected", explicit: true }, outputState: "present" } as SingleResult;
+		const inferredRejected = { agent: "delegate", exitCode: 0, acceptance: { status: "rejected", explicit: false }, outputState: "present" } as SingleResult;
 
 		assert.equal(shouldSuppressRoutineResultIntercom({ suppressRoutineResultIntercom: true, results: [completed] }), true);
 		assert.equal(shouldSuppressRoutineResultIntercom({ suppressRoutineResultIntercom: true, results: [failed] }), false);
-		assert.equal(shouldSuppressRoutineResultIntercom({ suppressRoutineResultIntercom: true, results: [rejected] }), false);
+		assert.equal(shouldSuppressRoutineResultIntercom({ suppressRoutineResultIntercom: true, results: [explicitRejected] }), false);
+		assert.equal(shouldSuppressRoutineResultIntercom({ suppressRoutineResultIntercom: true, results: [inferredRejected] }), true);
 		assert.equal(shouldSuppressRoutineResultIntercom({ suppressRoutineResultIntercom: false, results: [completed] }), false);
 	});
 
-	it("marks acceptance-rejected foreground intercom results as failed", () => {
-		const rejected = { agent: "delegate", exitCode: 0, acceptance: { status: "rejected" }, outputState: "present" } as SingleResult;
+	it("keeps inferred acceptance rejection orthogonal to foreground execution status", () => {
+		const explicitRejected = { agent: "delegate", exitCode: 1, acceptance: { status: "rejected", explicit: true }, outputState: "present" } as SingleResult;
+		const inferredRejected = { agent: "delegate", exitCode: 0, acceptance: { status: "rejected", explicit: false }, outputState: "present" } as SingleResult;
 
-		assert.equal(foregroundResultIntercomStatus(rejected), "failed");
+		assert.equal(foregroundResultIntercomStatus(explicitRejected), "failed");
+		assert.equal(foregroundResultIntercomStatus(inferredRejected), "completed");
 	});
 
 	it("shows final workflow output after live-card progress completes", () => {

@@ -36,7 +36,7 @@ import { clearLegacyResultAnimationTimer, renderSubagentResult, renderSubagentSu
 import { getInspectorPlugins, registerInspectorEventListener } from "../inspectors/plugins.ts";
 import { SubagentFleetStatus, resolveFleetViewPlacement } from "../tui/fleet-status.ts";
 import { readMainThinkingLevel, setMainThinkingLevelSource } from "../tui/running-tone.ts";
-import { createSubagentParamsSchema } from "./schemas.ts";
+import { createOrchestrationSubagentParamsSchema, createSubagentParamsSchema } from "./schemas.ts";
 import { resolveDisabledFeatureSurface } from "../shared/disabled-features.ts";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
@@ -321,7 +321,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		return;
 	}
 	registerClefDecisions(pi);
-	const orchestrationMode = registerOrchestrationMode(pi);
+	let refreshSubagentTool: (() => void) | undefined;
+	const orchestrationMode = registerOrchestrationMode(pi, { onModeChange: () => refreshSubagentTool?.() });
 	const runtimeRegistry = getRuntimeRegistry();
 	setMainThinkingLevelSource(() => readMainThinkingLevel(() => pi.getThinkingLevel()));
 
@@ -768,56 +769,60 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	});
 
 
-	const parameters = createSubagentParamsSchema(disabledFeatures);
-	const tool: ToolDefinition<typeof parameters, Details> = {
-		name: "subagent",
-		...MODEL_ONLY_TOOL,
-		label: "Subagent",
-		description: buildSubagentToolDescription(config, { disabledFeatures }),
-		...buildSubagentToolPromptMetadata(config, disabledFeatures),
-		parameters,
+	const registerSubagentTool = () => {
+		const parameters = orchestrationMode.isEnabled()
+			? createOrchestrationSubagentParamsSchema(disabledFeatures)
+			: createSubagentParamsSchema(disabledFeatures);
+		const tool: ToolDefinition<typeof parameters, Details> = {
+			name: "subagent",
+			...MODEL_ONLY_TOOL,
+			label: "Subagent",
+			description: buildSubagentToolDescription(config, { disabledFeatures }),
+			...buildSubagentToolPromptMetadata(config, disabledFeatures),
+			parameters,
 
-		async execute(id, params, signal, onUpdate, ctx) {
-			const removedField = removedModelWorkflowFieldError(params);
-			if (removedField) throw new Error(removedField);
-			return finalizeToolResult(await executeSubagentCollapsed(id, params as SubagentParamsLike, signal ?? new AbortController().signal, onUpdate, ctx));
-		},
+			async execute(id, params, signal, onUpdate, ctx) {
+				const removedField = removedModelWorkflowFieldError(params);
+				if (removedField) throw new Error(removedField);
+				return finalizeToolResult(await executeSubagentCollapsed(id, params as SubagentParamsLike, signal ?? new AbortController().signal, onUpdate, ctx));
+			},
 
-		renderCall(args, theme) {
-			const gap = " ".repeat(config.mainWindowRenderer?.horizontalSpacing ?? 1);
-			const title = theme.fg("toolTitle", theme.bold("subagent"));
-			if (args.action) {
-				const target = args.agent || "";
+			renderCall(args, theme) {
+				const gap = " ".repeat(config.mainWindowRenderer?.horizontalSpacing ?? 1);
+				const title = theme.fg("toolTitle", theme.bold("subagent"));
+				if (args.action) {
+					const target = args.agent || "";
+					return new Text(
+						`${title}${gap}${args.action}${target ? `${gap}${theme.fg("accent", target)}` : ""}`,
+						0, 0,
+					);
+				}
+				if (args.workflow !== undefined)
+					return new Text(
+						`${title}${gap}${theme.fg("accent", args.workflow === true || args.workflow === "true" ? "workflow (reply block)" : `workflow ${String(args.workflow)}`)}${args.async === true ? `${gap}${theme.fg("warning", "[async]")}` : ""}${args.preflight !== undefined ? `${gap}${theme.fg("dim", formatWorkflowPreflightCall(args.preflight))}` : ""}`,
+						0,
+						0,
+					);
+				const asyncLabel = args.async === true ? `${gap}${theme.fg("warning", "[async]")}` : "";
 				return new Text(
-					`${title}${gap}${args.action}${target ? `${gap}${theme.fg("accent", target)}` : ""}`,
-					0, 0,
-				);
-			}
-			if (args.workflow !== undefined)
-				return new Text(
-					`${title}${gap}${theme.fg("accent", args.workflow === true || args.workflow === "true" ? "workflow (reply block)" : `workflow ${String(args.workflow)}`)}${args.async === true ? `${gap}${theme.fg("warning", "[async]")}` : ""}${args.preflight !== undefined ? `${gap}${theme.fg("dim", formatWorkflowPreflightCall(args.preflight))}` : ""}`,
+					`${title}${gap}${theme.fg("accent", args.agent || "?")}${asyncLabel}`,
 					0,
 					0,
 				);
-			const asyncLabel = args.async === true ? `${gap}${theme.fg("warning", "[async]")}` : "";
-			return new Text(
-				`${title}${gap}${theme.fg("accent", args.agent || "?")}${asyncLabel}`,
-				0,
-				0,
-			);
-		},
+			},
 
-		renderResult(result, options, theme, context) {
-			clearLegacyResultAnimationTimer(context);
-			const renderedResult = { ...result, isError: context.isError };
-			return summaryInlineToolDisplay
-				? renderSubagentSummary(renderedResult, options, theme)
-				: renderSubagentResult(renderedResult, options, theme, undefined, config.mainWindowRenderer, config.foregroundDetachShortcut);
-		},
-
+			renderResult(result, options, theme, context) {
+				clearLegacyResultAnimationTimer(context);
+				const renderedResult = { ...result, isError: context.isError };
+				return summaryInlineToolDisplay
+					? renderSubagentSummary(renderedResult, options, theme)
+					: renderSubagentResult(renderedResult, options, theme, undefined, config.mainWindowRenderer, config.foregroundDetachShortcut);
+			},
+		};
+		pi.registerTool(tool);
 	};
-
-	pi.registerTool(tool);
+	refreshSubagentTool = registerSubagentTool;
+	registerSubagentTool();
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		await waitForAdvertisement();

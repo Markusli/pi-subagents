@@ -1,6 +1,7 @@
 ---
 name: scout
 description: Fast codebase recon that returns compressed context for handoff
+acceptanceRole: read-only
 tools: read, grep, find, ls, bash, write, contact_supervisor
 thinking: low
 systemPromptMode: replace

@@ -312,6 +312,33 @@ export function createSubagentParamsSchema(disabled?: DisabledFeatureSurface): t
 	return keepTopLevelParameterDescriptions(Type.Object(enabledProperties)) as typeof SubagentParams;
 }
 
+const ORCHESTRATION_ACTIONS = [
+	"list", "children.list", "status", "interrupt", "stop", "resume", "steer",
+	"mission.list", "mission.show", "mission.update", "mission.resolve-decision", "mission.close",
+	"doctor", "guide",
+] as const;
+
+const ORCHESTRATION_PARAM_NAMES = new Set([
+	"agent", "task", "action", "capabilities", "id", "runId", "dir", "index", "childId", "view", "lines", "topic", "message", "mode",
+	"missionId", "mission", "missionUpdate", "missionStatus", "missionScope", "summary",
+	"workflow", "args", "chatProgress", "worktree", "baseRef", "context", "async", "timeoutMs", "maxRuntimeMs", "checkpointBeforeDeadlineMs",
+	"toolTimeoutMs", "toolBudget", "usageBudget", "cwd", "artifacts", "control", "output", "outputMode", "skill", "outputSchema", "acceptance",
+]);
+
+export function createOrchestrationSubagentParamsSchema(disabled?: DisabledFeatureSurface): typeof SubagentParams {
+	const enabledProperties = Object.fromEntries(Object.entries(SubagentParamProperties).flatMap(([name, schema]) => {
+		if (!ORCHESTRATION_PARAM_NAMES.has(name) || disabled?.params.has(name)) return [];
+		if (name === "action") {
+			return [[name, Type.Optional(Type.String({ enum: [...ORCHESTRATION_ACTIONS], description: "Approved orchestration lifecycle/mission action; omit for a launch." }))]];
+		}
+		if (name === "workflow") {
+			return [[name, Type.Optional(Type.String({ enum: ["reviewed-implementation"], description: "Only the package-owned reviewed-implementation workflow is available in orchestration mode." }))]];
+		}
+		return [[name, schema]];
+	}));
+	return keepTopLevelParameterDescriptions(Type.Object(enabledProperties)) as typeof SubagentParams;
+}
+
 const SubagentWaitParamsSchema = Type.Object({
 	id: Type.Optional(Type.String({
 		description: "Async run or remembered detached foreground run id/prefix to wait for one specific run. Ordinary async subagent runs already notify this session natively; use bg_wait for provider, detached, or other background work without native notification, or when same-turn blocking results are truly needed. Omit to wait across every active async run started in this session only when a same-turn wait is truly needed.",

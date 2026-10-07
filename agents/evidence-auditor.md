@@ -1,6 +1,7 @@
 ---
 name: evidence-auditor
 description: Independent evidence reviewer for checking whether important research claims are supported by their sources
+acceptanceRole: read-only
 tools: read, web_search, fetch_content, get_search_content, source_check
 thinking: high
 systemPromptMode: replace

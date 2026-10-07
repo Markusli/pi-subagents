@@ -1,6 +1,7 @@
 ---
 name: verifier
 description: Independent qualification of fixed claims using executable and local evidence
+acceptanceRole: read-only
 tools: read, grep, find, ls, bash
 thinking: high
 systemPromptMode: replace

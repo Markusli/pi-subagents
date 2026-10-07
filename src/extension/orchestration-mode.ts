@@ -68,7 +68,8 @@ Do not bypass semantic roles with external CLI writer agents, acceptance/gate sh
 interface PersistedModeState { enabled: boolean; normalTools?: string[] }
 
 interface OrchestrationModeOptions {
-	discoverUserAgentNames?: (cwd: string) => string[];
+	discoverUserAgents?: (cwd: string) => Array<{ name: string; acceptanceRole?: "read-only" | "writer" }>;
+	onModeChange?: (enabled: boolean) => void;
 }
 
 export interface OrchestrationPolicyDecision {
@@ -113,9 +114,9 @@ export function registerOrchestrationMode(pi: ExtensionAPI, options: Orchestrati
 	let enabled = false;
 	let normalTools: string[] | undefined;
 	let currentCwd = process.cwd();
-	const discoverUserAgentNames = options.discoverUserAgentNames ?? ((cwd: string) => discoverAgents(cwd, "user").agents
+	const discoverUserAgents = options.discoverUserAgents ?? ((cwd: string) => discoverAgents(cwd, "user").agents
 		.filter((agent) => agent.source === "user")
-		.map((agent) => agent.name));
+		.map((agent) => ({ name: agent.name, acceptanceRole: agent.acceptanceRole })));
 
 	const availableToolNames = () => new Set(pi.getAllTools().map((tool) => tool.name));
 	const orchestrationTools = () => {
@@ -150,12 +151,14 @@ export function registerOrchestrationMode(pi: ExtensionAPI, options: Orchestrati
 		if (!enabled) normalTools = [...pi.getActiveTools()];
 		enabled = true;
 		setTools(orchestrationTools());
+		options.onModeChange?.(true);
 		if (shouldPersist) persist();
 		ctx.ui.notify("Pi orchestration mode ON", "info");
 	};
 	const exit = (ctx: ExtensionContext, shouldPersist = true) => {
 		if (!enabled) return;
 		enabled = false;
+		options.onModeChange?.(false);
 		let restored: string[] | undefined;
 		if (normalTools) {
 			const available = availableToolNames();
@@ -170,6 +173,7 @@ export function registerOrchestrationMode(pi: ExtensionAPI, options: Orchestrati
 		ctx.ui.notify("Pi orchestration mode OFF", "info");
 	};
 	const resync = (ctx: ExtensionContext) => {
+		const wasEnabled = enabled;
 		const persisted = latestPersistedState(ctx);
 		if (persisted?.enabled) {
 			const persistedNormalTools = persisted.normalTools ? [...persisted.normalTools] : undefined;
@@ -182,6 +186,7 @@ export function registerOrchestrationMode(pi: ExtensionAPI, options: Orchestrati
 			}
 			enabled = true;
 			setTools(orchestrationTools());
+			if (!wasEnabled) options.onModeChange?.(true);
 			return;
 		}
 		if (persisted?.normalTools) {
@@ -198,12 +203,13 @@ export function registerOrchestrationMode(pi: ExtensionAPI, options: Orchestrati
 		}
 		enabled = false;
 		normalTools = undefined;
+		if (wasEnabled) options.onModeChange?.(false);
 	};
 
 	const userRoleCapabilityCeiling = (): { block: true; reason: string } | Record<string, unknown> => {
 		let userAgentNames: string[];
 		try {
-			userAgentNames = discoverUserAgentNames(currentCwd);
+			userAgentNames = discoverUserAgents(currentCwd).map((agent) => agent.name);
 		} catch (error) {
 			return { block: true, reason: `Pi orchestration mode could not validate the user role catalog: ${error instanceof Error ? error.message : String(error)}` };
 		}
@@ -284,15 +290,17 @@ export function registerOrchestrationMode(pi: ExtensionAPI, options: Orchestrati
 		if (outputEscapesManagedArtifacts(normalized.output)) {
 			return { block: { block: true, reason: "Pi orchestration mode permits only relative managed output paths; absolute paths, parent traversal, and implicit agent-default outputs are not allowed." }, params: normalized };
 		}
-		let userAgentNames: string[];
+		let userAgents: Array<{ name: string; acceptanceRole?: "read-only" | "writer" }>;
 		try {
-			userAgentNames = discoverUserAgentNames(currentCwd);
+			userAgents = discoverUserAgents(currentCwd);
 		} catch (error) {
 			return { block: { block: true, reason: `Pi orchestration mode could not validate the user role catalog: ${error instanceof Error ? error.message : String(error)}` }, params: normalized };
 		}
-		if (!userAgentNames.includes(normalized.agent)) {
+		const selectedAgent = userAgents.find((agent) => agent.name === normalized.agent);
+		if (!selectedAgent) {
 			return { block: { block: true, reason: `Pi orchestration mode may launch only user-owned semantic roles; '${normalized.agent}' is not in the user role catalog.` }, params: normalized };
 		}
+		if (selectedAgent.acceptanceRole === "read-only") delete normalized.acceptance;
 		// Ignore project-local role definitions while orchestrating. The operational
 		// role catalog is the user-level catalog configured for this Pi installation.
 		normalized.agentScope = "user";
@@ -301,7 +309,7 @@ export function registerOrchestrationMode(pi: ExtensionAPI, options: Orchestrati
 		// the tool_call hook has validated the direct request.
 		normalized.capabilityCeiling = {
 			version: 1,
-			allowedAgents: [...userAgentNames].sort(),
+			allowedAgents: userAgents.map((agent) => agent.name).sort(),
 			denyExtensions: false,
 			sources: ["orchestration-mode:user-role-catalog"],
 		};
@@ -337,7 +345,11 @@ export function registerOrchestrationMode(pi: ExtensionAPI, options: Orchestrati
 		// caller's request object itself. A non-extensible input is left untouched here;
 		// executeSubagentReady normalizes its own copy before executing.
 		if (event.input && typeof event.input === "object" && Object.isExtensible(event.input)) {
-			Object.assign(event.input as Record<string, unknown>, policy.params);
+			const mutableInput = event.input as Record<string, unknown>;
+			for (const field of Object.keys(mutableInput)) {
+				if (!Object.hasOwn(policy.params, field)) delete mutableInput[field];
+			}
+			Object.assign(mutableInput, policy.params);
 		}
 	});
 

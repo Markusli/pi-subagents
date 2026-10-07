@@ -72,6 +72,11 @@ describe("acceptance gates", () => {
 		assert.equal(builtins.find((agent) => agent.name === "delegate")?.acceptanceRole, undefined);
 		const worker = builtins.find((agent) => agent.name === "worker");
 		assert.equal(resolveEffectiveAcceptance({ agentName: "worker", acceptanceRole: worker?.acceptanceRole }).level, "checked");
+		for (const name of ["reviewer", "scout", "verifier", "evidence-auditor", "oracle"]) {
+			const agent = builtins.find((candidate) => candidate.name === name);
+			assert.equal(agent?.acceptanceRole, "read-only", name);
+			assert.equal(resolveEffectiveAcceptance({ agentName: name, acceptanceRole: agent?.acceptanceRole }).level, "none", name);
+		}
 	});
 
 	it("infers evidence levels and review requirements from declared roles", () => {

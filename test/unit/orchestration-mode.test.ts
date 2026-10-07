@@ -5,7 +5,13 @@ import { registerOrchestrationMode } from "../../src/extension/orchestration-mod
 type Handler = (...args: any[]) => any;
 
 function makeHarness() {
-	const userAgentNames = ["worker", "reviewer", "scout", "experiment-spot-cpu", "experiment-spot-gpu"];
+	const userAgents = [
+		{ name: "worker", acceptanceRole: "writer" as const },
+		{ name: "reviewer", acceptanceRole: "read-only" as const },
+		{ name: "scout", acceptanceRole: "read-only" as const },
+		{ name: "experiment-spot-cpu" },
+		{ name: "experiment-spot-gpu" },
+	];
 	const handlers = new Map<string, Handler[]>();
 	const commands = new Map<string, { handler: Handler }>();
 	const entries: Array<{ customType: string; data: unknown }> = [];
@@ -41,7 +47,8 @@ function makeHarness() {
 		ui: { notify: (message: string) => notifications.push(message) },
 		sessionManager: { getBranch: () => branch },
 	};
-	const handle = registerOrchestrationMode(pi as never, { discoverUserAgentNames: () => [...userAgentNames] });
+	const modeChanges: boolean[] = [];
+	const handle = registerOrchestrationMode(pi as never, { discoverUserAgents: () => [...userAgents], onModeChange: (enabled) => modeChanges.push(enabled) });
 	return {
 		pi,
 		ctx,
@@ -51,6 +58,7 @@ function makeHarness() {
 		entries,
 		branch,
 		notifications,
+		modeChanges,
 		allTools,
 		get activeTools() { return activeTools; },
 		setFlag(value: boolean) { flag = value; },
@@ -117,6 +125,10 @@ describe("orchestration mode", () => {
 		assert.equal((await emit(h, "tool_call", { toolName: "subagent", input: directInput }))[0], undefined);
 		assert.equal(directInput.agentScope, "user");
 		assert.deepEqual((directInput.capabilityCeiling as { allowedAgents?: string[] }).allowedAgents, ["experiment-spot-cpu", "experiment-spot-gpu", "reviewer", "scout", "worker"]);
+
+		const readOnlyInput: Record<string, unknown> = { agent: "reviewer", task: "Review the diff", acceptance: { level: "checked", evidence: ["changed-files", "tests-added"] } };
+		assert.equal((await emit(h, "tool_call", { toolName: "subagent", input: readOnlyInput }))[0], undefined);
+		assert.equal(readOnlyInput.acceptance, undefined);
 
 		for (const input of [
 			{ agent: "worker", task: "x", skill: "stationer-sqlmesh-operations", acceptance: { level: "checked", criteria: ["Return exact validation evidence"], evidence: ["commands-run", "residual-risks"], stopRules: ["Stop on an unapproved product decision"] } },
@@ -186,6 +198,7 @@ describe("orchestration mode", () => {
 
 		await h.commands.get("orchestrate")!.handler("off", h.ctx);
 		assert.deepEqual(h.activeTools, h.allTools);
+		assert.deepEqual(h.modeChanges, [true, false]);
 		assert.ok(h.entries.some((entry) => (entry.data as { enabled?: boolean }).enabled === true));
 		assert.ok(h.entries.some((entry) => (entry.data as { enabled?: boolean }).enabled === false));
 	});
@@ -196,6 +209,7 @@ describe("orchestration mode", () => {
 		await emit(h, "session_start", { reason: "resume" });
 		assert.ok(h.activeTools.includes("subagent"));
 		assert.equal(h.activeTools.includes("bash"), false);
+		assert.deepEqual(h.modeChanges, [true]);
 		await h.commands.get("orchestrate")!.handler("off", h.ctx);
 		assert.deepEqual(h.activeTools, h.allTools);
 	});

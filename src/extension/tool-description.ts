@@ -16,7 +16,8 @@ function featureText(disabled: DisabledFeatureSurface): FeatureText {
 }
 
 const safetyGuidance = (on: FeatureText) => `SAFETY-CRITICAL SUBAGENT GUIDANCE:
-• Direct parent execution is the default. Invoke subagents only when delegation is authorized by the operator's current request or applicable user/project instructions; task size, complexity, risk, tool-call count, or recipe fit do not independently authorize delegation.
+• Direct parent execution is the default. Invoke subagents only when delegation is authorized by the operator's current request or applicable user/project instructions, including standing delegation instructions. Task size, complexity, risk, tool-call count, or recipe fit do not independently authorize delegation.
+• Once delegation is authorized, reassess topology when the task expands. If two or more genuinely independent evidence-acquisition or isolated-execution lanes can return compact results without sharing decision ownership, prefer dispatching them concurrently instead of serially absorbing all work into the parent. Keep tightly coupled decisions and synthesis in the parent.
 • ${AGENT_SELECTION_GUIDANCE}
 • ${SUBAGENT_FAILURE_RECOVERY_GUIDANCE}
 • Omit action for execution. For an authorized delegated multi-step/parallel workflow: exactly one top-level subagent ${on("workflow-scripts", "workflow call with async:true; children launch only inside it", "chain or tasks call with async:true")}.
@@ -65,10 +66,11 @@ export const SUBAGENT_SAFETY_GUIDANCE = safetyGuidance(allEnabled);
 
 export const DEFAULT_SUBAGENT_TOOL_DESCRIPTION = defaultDescription(allEnabled);
 
-export const SUBAGENT_TOOL_PROMPT_SNIPPET = "For operator-requested delegation, use subagents; compose multi-child work in one workflow call.";
-const STRUCTURED_SUBAGENT_TOOL_PROMPT_SNIPPET = "For operator-requested delegation, use subagents; compose multi-child work in one chain or tasks call.";
+export const SUBAGENT_TOOL_PROMPT_SNIPPET = "When delegation is authorized by the current request or standing/applicable instructions, use subagents for bounded independent lanes; compose multi-child work in one workflow call.";
+const STRUCTURED_SUBAGENT_TOOL_PROMPT_SNIPPET = "When delegation is authorized by the current request or standing/applicable instructions, use subagents for bounded independent lanes; compose multi-child work in one chain or tasks call.";
 export const SUBAGENT_TOOL_PROMPT_GUIDELINES = [
-	"Do not invoke subagents unless the operator requested delegation directly or through applicable instructions.",
+	"Do not invoke subagents without delegation authority from the current request or applicable user/project instructions; standing delegation instructions count as authority.",
+	"When authorized work expands into two or more independent evidence or isolated-execution lanes, reassess topology and prefer concurrent bounded subagents while keeping shared decisions and synthesis in the parent.",
 ];
 
 export const COMPACT_SUBAGENT_TOOL_DESCRIPTION = DEFAULT_SUBAGENT_TOOL_DESCRIPTION;

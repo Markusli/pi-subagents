@@ -14,10 +14,11 @@ describe("pi-subagents delegation policy guidance", () => {
 		const guidance = [skill, prompting, recipes, lanes].join("\n");
 
 		assert.match(skill, /parent works directly by default/i);
-		assert.match(skill, /only when the operator\s+requested delegation in the current request.*applicable user\/project\s+instructions/is);
-		assert.match(skill, /task size, complexity, risk, tool-call count, recipe fit.*does not independently authorize delegation/is);
+		assert.match(skill, /only when the operator\s+requested delegation in the current request.*applicable user\/project\s+instructions.*standing delegation instructions/is);
+		assert.match(skill, /task size,\s+complexity, risk, tool-call count, recipe fit.*does\s+not independently authorize delegation/is);
 		assert.match(skill, /smallest bounded shape.*earns its token and\s+elapsed-time overhead/is);
 		assert.match(skill, /solo parent\*\* as a successful topology\s+choice/is);
+		assert.match(skill, /Reassess that choice when the task expands.*two or more evidence-acquisition or isolated-execution lanes.*dispatching them concurrently/is);
 		assert.match(skill, /parallelize\s+independent information acquisition or isolated execution, not shared\s+decision-making/is);
 		assert.match(prompting, /all launch guidance.*assumes delegation was requested by the operator/is);
 		assert.match(recipes, /recipes select a shape; they do not authorize delegation/i);

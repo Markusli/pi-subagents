@@ -10,8 +10,9 @@ description: |
 
 The parent works directly by default. Invoke subagents only when the operator
 requested delegation in the current request or through applicable user/project
-instructions. Task size, complexity, risk, tool-call count, recipe fit, or an
-available specialist does not independently authorize delegation.
+instructions, including standing delegation instructions. Task size,
+complexity, risk, tool-call count, recipe fit, or an available specialist does
+not independently authorize delegation.
 
 Once authorized, choose the smallest bounded shape that earns its token and
 elapsed-time overhead through concrete evidence, independent review,
@@ -29,6 +30,14 @@ and their resolved `tools` allow `subagent`.
 After delegation is authorized, first decide whether another independent context
 actually improves the work. Treat **solo parent** as a successful topology
 choice, not as a failure to orchestrate.
+
+Reassess that choice when the task expands. A plan, todo expansion, or newly
+discovered work may reveal independent lanes that were not visible at the
+start. If two or more evidence-acquisition or isolated-execution lanes can run
+without sharing decision ownership and can return compact results, prefer
+dispatching them concurrently instead of serially accumulating their retrieval
+and execution in the parent. Keep cross-lane decisions, scientific or
+architectural judgment, and final synthesis in the parent.
 
 - Stay **solo** for tightly coupled work where one coherent context must own the
   decisions, or when the parent can inspect the bounded evidence more cheaply

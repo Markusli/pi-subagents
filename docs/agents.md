@@ -545,7 +545,10 @@ When a skill file references a relative path, resolve it against the skill direc
 
 If an agent has an explicit `tools` allowlist and resolved skills, `read` is added for that child run so the listed skill files can be loaded on demand.
 
-Missing skills do not fail execution. The result summary shows a warning.
+Agent-management create/update reports missing configured skills as warnings;
+this is not an execution success guarantee. An explicitly requested missing
+skill at child launch is rejected, so correct the skill binding before retrying
+instead of launching the same required work without it.
 
 Agent-local `skillPath` candidates never enter Pi's parent/global skills catalog. Pair `inheritSkills: false` with explicit `skills` and `skillPath` when a child should receive only its selected private skills.
 

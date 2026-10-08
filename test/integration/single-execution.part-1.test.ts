@@ -66,7 +66,7 @@ import { createWorkflowChildPermit, workflowChildPermitConsumed } from "../../sr
 import { toSubagentDelegationExecutionParams } from "../../src/slash/delegation-adapters.ts";
 import { registerWorkflowResource } from "../../src/api/workflow-resources.ts";
 import { registerSubagentCapabilityCeiling } from "../../src/api/capability-ceiling.ts";
-import { appendWorkflowChildJournal, runtimeReplacedAbortReason, workflowChildFingerprint } from "../../src/workflows/workflow-reuse.ts";
+import { appendWorkflowChildJournal, runtimeReplacedAbortReason, workflowChildFingerprint, workflowScriptDigest } from "../../src/workflows/workflow-reuse.ts";
 import { updateTerminalRunIndex } from "../../src/runs/background/terminal-run-index.ts";
 
 describe("single sync execution", { skip: !available ? "pi packages not available" : undefined }, () => {
@@ -1642,6 +1642,58 @@ Answer only from the supplied synthetic text.
 		assert.deepEqual(result.details.workflow?.args, {});
 		assert.equal(result.details.workflow?.argsDigest, stableJsonDigest({}));
 		assert.equal(mockPi.callCount(), 1);
+	});
+
+	it("blocks an identical live workflow without blocking distinct or runtime-replaced launches", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
+		const script = 'return "no child required";';
+		const args = { focus: "source" };
+		const existing = {
+			asyncId: "existing-workflow", asyncDir: path.join(tempDir, "existing-workflow"), status: "running" as const,
+			sessionId: "session-123", cwd: tempDir, mode: "workflow" as const,
+			workflow: { scriptDigest: workflowScriptDigest(script), argsDigest: stableJsonDigest(args), trace: [], emits: [], console: [] },
+		};
+		const jobs = new Map([[existing.asyncId, existing]]);
+		const controllers = new Map([[existing.asyncId, new AbortController()]]);
+		const executor = makeExecutor([makeAgent("echo")], {}, true, undefined, true, jobs, controllers);
+		const ctx = makeMinimalCtx(tempDir);
+		fs.writeFileSync(path.join(tempDir, "same-workflow.js"), script);
+		const rejected = await executor.executePublic("duplicate-workflow", { workflow: "./same-workflow.js", args, async: true }, new AbortController().signal, undefined, ctx);
+		assert.equal(rejected.isError, true);
+		assert.match(rejected.content[0]?.text ?? "", /Identical async workflow already running as existing-workflow/);
+		assert.equal(mockPi.callCount(), 0);
+
+		// Changed args are a distinct execution. An old runtime's status without
+		// its live controller cannot suppress the recovery relaunch.
+		const distinct = await executor.executePublic("distinct-workflow", { workflowScript: script, args: { focus: "other" }, async: true }, new AbortController().signal, undefined, ctx);
+		assert.equal(distinct.isError, undefined, distinct.content[0]?.text ?? "distinct launch failed");
+		controllers.delete(existing.asyncId);
+		const recovery = await executor.executePublic("recovery-workflow", { workflowScript: script, args, async: true }, new AbortController().signal, undefined, ctx);
+		assert.equal(recovery.isError, undefined, recovery.content[0]?.text ?? "recovery launch failed");
+	});
+
+	it("rejects one of two simultaneous identical async workflow launches", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
+		const release = path.join(tempDir, "release-duplicate-workflow");
+		mockPi.onCall({ matchArgIncludes: "held-review", waitForPath: release, output: "review completed" });
+		const executor = makeExecutor([makeAgent("echo")], {}, true, undefined, true, new Map(), undefined, undefined, createEventBus(), undefined, undefined, () => {});
+		const ctx = makeMinimalCtx(tempDir);
+		const params = { async: true, args: { target: "one" }, workflowScript: 'return await runs.run("review", {agent:"echo", task:"held-review"});' };
+		const [first, second] = await Promise.all([
+			executor.executePublic("concurrent-first", params, new AbortController().signal, undefined, ctx),
+			executor.executePublic("concurrent-second", params, new AbortController().signal, undefined, ctx),
+		]);
+		const launched = [first, second].filter((result) => !result.isError);
+		const rejected = [first, second].filter((result) => result.isError);
+		assert.equal(launched.length, 1);
+		assert.equal(rejected.length, 1);
+		assert.match(rejected[0]!.content[0]?.text ?? "", /Identical async workflow already running as/);
+		assert.ok(launched[0]!.details.asyncId);
+		fs.writeFileSync(release, "go");
+		await waitForAsyncState(launched[0]!.details.asyncId!, (status) => status.state === "complete", 30_000);
+		mockPi.onCall({ matchArgIncludes: "held-review", output: "second review completed" });
+		const repeated = await executor.executePublic("completed-repeat", params, new AbortController().signal, undefined, ctx);
+		assert.equal(repeated.isError, undefined, repeated.content[0]?.text ?? "completed workflow should be relaunchable");
+		assert.notEqual(repeated.details.asyncId, launched[0]!.details.asyncId);
+		await waitForAsyncState(repeated.details.asyncId!, (status) => status.state === "complete", 30_000);
 	});
 
 	it("passes normalized arguments to inline and file-backed workflow sandboxes with bound receipt evidence", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {

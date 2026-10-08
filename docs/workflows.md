@@ -51,6 +51,12 @@ Use direct `{ agent, task }` for one bounded child. Use a workflow script when t
 
 The `workflow` field selects the script source:
 
+For model-authored multiline workflows, a script file is the preferred source:
+it avoids the reply-block requirement for `workflow: true`. Keep the exact path
+and returned async run ID; do not repeat a successful launch just to check on
+its children. A runtime-replaced workflow may need the same script and args
+re-launched to recover surviving children, as described below.
+
 - `workflow: true` runs the one ```` ```js workflow ```` fenced block written in the same assistant reply as the `subagent` call. The script is plain text in the reply, so it needs no JSON string escaping. A reply can carry exactly one such block and one `workflow: true` call; zero or several blocks fail. A reply with no tagged block may instead carry exactly one plain ```` ```js ```` block, which then runs. A line containing only ```` ``` ```` (three or more backticks, optionally followed by spaces or tabs) ends the block, so keep Markdown fences inside quoted strings.
 - A string containing `/` (or `\` in a Windows path), such as `workflow: "./workflows/review.js"`, is a script file.
 - Any other string, such as `workflow: "review"`, is a [named workflow resource](#named-workflow-resources-for-permission-extensions). The string `"true"` is read as `workflow: true`, because some MCP clients send the boolean as a string.

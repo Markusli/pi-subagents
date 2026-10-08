@@ -25,6 +25,8 @@ describe("pi-subagents delegation policy guidance", () => {
 		assert.match(recipes, /isolated worktrees prevent filesystem collisions but do not make coupled design\s+decisions independent/is);
 		assert.match(lanes, /only after delegation is operator-authorized.*materially improves/is);
 		assert.match(lanes, /independently testable contracts or source boundaries are \*\*candidate\*\* seams.*not sufficient evidence for parallel writers/is);
+		assert.match(skill, /prefer writing the script to a file.*avoids.*workflow: true.*without the required text block/is);
+		assert.match(skill, /missing requested skill blocks.*never strip a required skill/is);
 
 		assert.doesNotMatch(guidance, /not the routine primary doer/i);
 		assert.doesNotMatch(guidance, /delegate[^\n]*(?:most|all) non-trivial requests/i);

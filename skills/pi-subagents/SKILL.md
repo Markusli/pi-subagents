@@ -71,10 +71,14 @@ decision-making.
 | Council of advisors | `../council-mode/SKILL.md` |
 | Management, status, steering, authoring, or inspection | `action` |
 
-To launch a workflow script, write it as one ```` ```js workflow ```` fenced
-block in your reply, then call `subagent({ workflow: true, ... })` in the same
-reply. Use `workflow: "./path/to/script.js"` for a script file and
-`workflow: "<name>"` for a named resource.
+For a generated or multiline workflow, prefer writing the script to a file and
+calling `subagent({ workflow: "./path/to/script.js", ... })`. This avoids
+models issuing `workflow: true` without the required text block. The inline
+alternative remains supported: write one ```` ```js workflow ```` fenced block
+in the same reply as `subagent({ workflow: true, ... })`. Use
+`workflow: "<name>"` for a named resource. After a successful async launch,
+retain its run ID and inspect its status rather than launching the same script
+and arguments again. A runtime-replaced workflow is the documented exception.
 
 A workflow script is code-driven: `runs.run(...)` for keyed steps,
 `runs.all([...])` for fanout, plain JavaScript for branching and aggregation.
@@ -141,6 +145,7 @@ For an authorized complex delegated workflow, read `prompting-and-roles.md` and
 ## Operating rules
 
 - Avoid duplicate scouts, overlapping writers, and vague prompts without a concrete deliverable.
+- A missing requested skill blocks its delegated lane. Resolve the skill name or installation and retry with the skill; never strip a required skill to make the launch succeed. Recheck domain skill routing when the investigation changes from the initial problem.
 - Keep the parent on the ordinary strong default model. Route workers/scouts to a fast capable tier, serious reviews to a strong tier, and top reasoning to bounded read-only critique.
 - Exact model names are deployment policy. Put them in user/project settings or profiles, not package guidance.
 - Give every child a compact meta-prompt checklist: objective; repo/cwd/ref; authority/edit boundary; relevant files/contracts and constraints; success/acceptance criteria; validation; expected output/report; and stop/ask conditions. See `references/prompting-and-roles.md`.

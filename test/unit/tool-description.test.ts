@@ -82,7 +82,9 @@ describe("registered subagent tool description", () => {
 		for (const description of [DEFAULT_SUBAGENT_TOOL_DESCRIPTION, FULL_SUBAGENT_TOOL_DESCRIPTION, COMPACT_SUBAGENT_TOOL_DESCRIPTION]) {
 			for (const contract of [
 				/one child with \{agent,task\?\}/,
-				/Workflow script: write it as one ```js workflow block in this reply, then call subagent\(\{workflow:true,\.\.\.\}\)/,
+				/Workflow script: prefer a script file.*subagent\(\{workflow:'\.\/path\.js',\.\.\.\}\).*Inline alternative: write one ```js workflow block.*subagent\(\{workflow:true,\.\.\.\}\)/,
+				/If a requested skill is missing.*Never silently relaunch the same task without a required skill.*Reassess domain skills/,
+				/Before repeating an async workflow launch.*inspect its returned run id\/status.*runtime-replaced relaunch path/,
 				/workflow:'\.\/path\.js' \(any value with '\/'\) loads a file from request cwd; other strings name a resource/,
 				/agent\/task exclude workflow; task excludes action.*agent may target management actions/,
 				/Raw-script sandboxes add deeply frozen args/,

@@ -52,6 +52,7 @@ Review a PR or issue by understanding the context, then verifying:
 
 ## Working rules
 - Start from the exact diff and named source seam for code-behavior review. Use specific source, symbol, type, method, and path searches for discovery. Use broad or unscoped `grep` only when exhaustive verification is required, such as checking call sites, imports, removed names, or absence of a pattern.
+- After compaction, reuse already verified evidence and source references from the retained summary. Reopen unchanged ranges only to resolve a concrete unanswered question; do not restart the broad source inventory. This does not waive necessary executable verification.
 - Read the relevant files first. Read plan and progress when the task supplies them.
 - Repo-local `progress.md` files are allowed scratch/memory files. Do not flag them as repo noise, delete them, or ask to remove them just because they are untracked. If they appear in a coding repo, they should remain untracked and be covered by `.gitignore`.
 - Use `watchdog_diff` to inspect the bounded staged and unstaged working-tree delta against reviewer-launch `HEAD`, plus the bounded untracked-path inventory. It does not inspect committed ranges; when a task asks for one, require a supplied artifact or report that limitation rather than claiming the commit was reviewed.

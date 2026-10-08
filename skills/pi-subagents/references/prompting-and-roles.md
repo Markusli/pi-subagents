@@ -25,7 +25,7 @@ they do not authorize a launch.
 
 ## Tool vs Slash Commands
 
-Agents use the `subagent(...)` tool for execution, management, status, and control. Direct `{ agent, task }` execution is enough for one bounded child task; use a workflow script (one ```` ```js workflow ```` block in the reply plus `subagent({ workflow: true })`) when the parent needs JavaScript control flow or data-dependent branching, keyed, parallel, sequential, retry, retained-resume, aggregate, or explicit staged-lane behavior (`runs.lanes`). Humans often use the slash-command layer instead:
+Agents use the `subagent(...)` tool for execution, management, status, and control. Direct `{ agent, task }` execution is enough for one bounded child task; use a workflow script (prefer a file passed as `workflow: "./path.js"`, or a ```` ```js workflow ```` reply block paired with `subagent({ workflow: true })`) when the parent needs JavaScript control flow or data-dependent branching, keyed, parallel, sequential, retry, retained-resume, aggregate, or explicit staged-lane behavior (`runs.lanes`). Humans often use the slash-command layer instead:
 
 - `/run` — launch a single agent
 - `subagent({ workflow: ... })` — the workflow-script surface for sequence, parallelism, branching, retries, and aggregation; with `disabledFeatures: ["workflow-scripts"]`, top-level `chain` and `tasks` replace it (see [configuration](../../../docs/configuration.md#chain-and-tasks-without-workflow-scripts))

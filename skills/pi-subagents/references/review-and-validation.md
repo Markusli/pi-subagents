@@ -27,6 +27,13 @@ Skip review ceremony for trivial wording, renames, or local-only probes when dir
 
 Reviewers are fresh-context by default. Use the ordinary `reviewer` role for routine code review. Forked oracle/advisor runs are escalation-only for parent-history, drift, root-cause, model-routing, or hard tradeoff evidence.
 
+Give reviewers the bounded diff and acceptance contract up front. Start from the
+changed surface and focused tests; do not rebuild a broad source inventory or
+re-read unchanged file ranges without a specific unanswered question. After
+compaction, use the evidence already recorded in the session summary and only
+reopen source ranges needed to resolve a finding. Never trade away an executable
+check that is necessary for correctness just to reduce reads.
+
 ## Finding disposition
 
 The parent classifies each finding against current HEAD:

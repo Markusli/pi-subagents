@@ -10,8 +10,9 @@ description: |
 
 The parent works directly by default. Invoke subagents only when the operator
 requested delegation in the current request or through applicable user/project
-instructions. Task size, complexity, risk, tool-call count, recipe fit, or an
-available specialist does not independently authorize delegation.
+instructions, including standing delegation instructions. Task size,
+complexity, risk, tool-call count, recipe fit, or an available specialist does
+not independently authorize delegation.
 
 Once authorized, choose the smallest bounded shape that earns its token and
 elapsed-time overhead through concrete evidence, independent review,
@@ -29,6 +30,14 @@ and their resolved `tools` allow `subagent`.
 After delegation is authorized, first decide whether another independent context
 actually improves the work. Treat **solo parent** as a successful topology
 choice, not as a failure to orchestrate.
+
+Reassess that choice when the task expands. A plan, todo expansion, or newly
+discovered work may reveal independent lanes that were not visible at the
+start. If two or more evidence-acquisition or isolated-execution lanes can run
+without sharing decision ownership and can return compact results, prefer
+dispatching them concurrently instead of serially accumulating their retrieval
+and execution in the parent. Keep cross-lane decisions, scientific or
+architectural judgment, and final synthesis in the parent.
 
 - Stay **solo** for tightly coupled work where one coherent context must own the
   decisions, or when the parent can inspect the bounded evidence more cheaply
@@ -62,10 +71,14 @@ decision-making.
 | Council of advisors | `../council-mode/SKILL.md` |
 | Management, status, steering, authoring, or inspection | `action` |
 
-To launch a workflow script, write it as one ```` ```js workflow ```` fenced
-block in your reply, then call `subagent({ workflow: true, ... })` in the same
-reply. Use `workflow: "./path/to/script.js"` for a script file and
-`workflow: "<name>"` for a named resource.
+For a generated or multiline workflow, prefer writing the script to a file and
+calling `subagent({ workflow: "./path/to/script.js", ... })`. This avoids
+models issuing `workflow: true` without the required text block. The inline
+alternative remains supported: write one ```` ```js workflow ```` fenced block
+in the same reply as `subagent({ workflow: true, ... })`. Use
+`workflow: "<name>"` for a named resource. After a successful async launch,
+retain its run ID and inspect its status rather than launching the same script
+and arguments again. A runtime-replaced workflow is the documented exception.
 
 A workflow script is code-driven: `runs.run(...)` for keyed steps,
 `runs.all([...])` for fanout, plain JavaScript for branching and aggregation.
@@ -132,6 +145,7 @@ For an authorized complex delegated workflow, read `prompting-and-roles.md` and
 ## Operating rules
 
 - Avoid duplicate scouts, overlapping writers, and vague prompts without a concrete deliverable.
+- A missing requested skill blocks its delegated lane. Resolve the skill name or installation and retry with the skill; never strip a required skill to make the launch succeed. Recheck domain skill routing when the investigation changes from the initial problem.
 - Keep the parent on the ordinary strong default model. Route workers/scouts to a fast capable tier, serious reviews to a strong tier, and top reasoning to bounded read-only critique.
 - Exact model names are deployment policy. Put them in user/project settings or profiles, not package guidance.
 - Give every child a compact meta-prompt checklist: objective; repo/cwd/ref; authority/edit boundary; relevant files/contracts and constraints; success/acceptance criteria; validation; expected output/report; and stop/ask conditions. See `references/prompting-and-roles.md`.

@@ -5496,6 +5496,23 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				&& workflowDepth === 0
 				&& !inheritedNestedRoute(deps)
 				&& !requestParams.workflowParentRunId;
+			// Only the current runtime's live controllers are authoritative here. A
+			// restored running status may belong to a replaced runtime whose script
+			// must be relaunched to reattach its children.
+			if (topLevelAsyncWorkflow) {
+				const scriptDigest = workflowScriptDigest(requestParams.workflowScript);
+				const sessionId = resolveCurrentSessionId(ctx.sessionManager);
+				const existing = [...(deps.state.workflowControllers?.keys() ?? [])]
+					.map((runId) => deps.state.asyncJobs.get(runId))
+					.find((job) => job?.mode === "workflow" && (job.status === "queued" || job.status === "running")
+						&& job.sessionId === sessionId && job.cwd === workflowCwd
+						&& job.workflow?.scriptDigest === scriptDigest && job.workflow?.argsDigest === workflowArgsDigest);
+				// Runtime-replaced recovery can deliberately race two relaunches: the
+				// existing child-import claim admits only one, and the loser runs fresh.
+				if (existing && !findWorkflowReuseSource(DIRS.async, sessionId, scriptDigest, workflowArgsDigest)) {
+					return buildRequestedModeError(requestParams, `Identical async workflow already running as ${existing.asyncId}. Inspect it with {action:"status",id:"${existing.asyncId}"} instead of launching a duplicate.`);
+				}
+			}
 			const workflowRunId = asyncWorkflow ? randomUUID() : undefined;
 			let workflowCapacity: ActiveAsyncCapacityHandle | undefined;
 			if (workflowRunId && topLevelAsyncWorkflow) {

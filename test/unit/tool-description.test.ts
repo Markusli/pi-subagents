@@ -32,7 +32,7 @@ function parentToolEnv(agentDir?: string): NodeJS.ProcessEnv {
 
 describe("registered subagent tool description", () => {
 	it("keeps the operator authority gate visible in every description mode", () => {
-		const authorityGate = "Direct parent execution is the default. Invoke subagents only when delegation is authorized by the operator's current request or applicable user/project instructions; task size, complexity, risk, tool-call count, or recipe fit do not independently authorize delegation.";
+		const authorityGate = "Direct parent execution is the default. Invoke subagents only when delegation is authorized by the operator's current request or applicable user/project instructions, including standing delegation instructions. Task size, complexity, risk, tool-call count, or recipe fit do not independently authorize delegation.";
 		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagents-tool-desc-authority-"));
 		const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagents-tool-desc-agent-"));
 		fs.mkdirSync(path.join(cwd, ".pi"), { recursive: true });
@@ -55,9 +55,10 @@ describe("registered subagent tool description", () => {
 	it("uses concise split metadata only by default", () => {
 		assert.equal(buildSubagentToolDescription(), DEFAULT_SUBAGENT_TOOL_DESCRIPTION);
 		const metadata = buildSubagentToolPromptMetadata();
-		assert.equal(SUBAGENT_TOOL_PROMPT_SNIPPET, "For operator-requested delegation, use subagents; compose multi-child work in one workflow call.");
+		assert.equal(SUBAGENT_TOOL_PROMPT_SNIPPET, "When delegation is authorized by the current request or standing/applicable instructions, use subagents for bounded independent lanes; compose multi-child work in one workflow call.");
 		assert.deepEqual(SUBAGENT_TOOL_PROMPT_GUIDELINES, [
-			"Do not invoke subagents unless the operator requested delegation directly or through applicable instructions.",
+			"Do not invoke subagents without delegation authority from the current request or applicable user/project instructions; standing delegation instructions count as authority.",
+			"When authorized work expands into two or more independent evidence or isolated-execution lanes, reassess topology and prefer concurrent bounded subagents while keeping shared decisions and synthesis in the parent.",
 		]);
 		assert.equal(metadata.promptSnippet, SUBAGENT_TOOL_PROMPT_SNIPPET);
 		assert.deepEqual(metadata.promptGuidelines, SUBAGENT_TOOL_PROMPT_GUIDELINES);
@@ -68,11 +69,22 @@ describe("registered subagent tool description", () => {
 		}
 	});
 
+	it("prompts authorized normal sessions to reconsider solo execution when independent lanes emerge", () => {
+		for (const description of [DEFAULT_SUBAGENT_TOOL_DESCRIPTION, FULL_SUBAGENT_TOOL_DESCRIPTION, COMPACT_SUBAGENT_TOOL_DESCRIPTION]) {
+			assert.match(description, /standing delegation instructions/);
+			assert.match(description, /reassess topology when the task expands/i);
+			assert.match(description, /two or more genuinely independent evidence-acquisition or isolated-execution lanes/i);
+			assert.match(description, /Keep tightly coupled decisions and synthesis in the parent/i);
+		}
+	});
+
 	it("keeps execution, authority, evidence and recovery contracts in every built-in mode", () => {
 		for (const description of [DEFAULT_SUBAGENT_TOOL_DESCRIPTION, FULL_SUBAGENT_TOOL_DESCRIPTION, COMPACT_SUBAGENT_TOOL_DESCRIPTION]) {
 			for (const contract of [
 				/one child with \{agent,task\?\}/,
-				/Workflow script: write it as one ```js workflow block in this reply, then call subagent\(\{workflow:true,\.\.\.\}\)/,
+				/Workflow script: prefer a script file.*subagent\(\{workflow:'\.\/path\.js',\.\.\.\}\).*Inline alternative: write one ```js workflow block.*subagent\(\{workflow:true,\.\.\.\}\)/,
+				/If a requested skill is missing.*Never silently relaunch the same task without a required skill.*Reassess domain skills/,
+				/Before repeating an async workflow launch.*inspect its returned run id\/status.*runtime-replaced relaunch path/,
 				/workflow:'\.\/path\.js' \(any value with '\/'\) loads a file from request cwd; other strings name a resource/,
 				/agent\/task exclude workflow; task excludes action.*agent may target management actions/,
 				/Raw-script sandboxes add deeply frozen args/,

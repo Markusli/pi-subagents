@@ -5507,7 +5507,11 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					.find((job) => job?.mode === "workflow" && (job.status === "queued" || job.status === "running")
 						&& job.sessionId === sessionId && job.cwd === workflowCwd
 						&& job.workflow?.scriptDigest === scriptDigest && job.workflow?.argsDigest === workflowArgsDigest);
-				if (existing) return buildRequestedModeError(requestParams, `Identical async workflow already running as ${existing.asyncId}. Inspect it with {action:"status",id:"${existing.asyncId}"} instead of launching a duplicate.`);
+				// Runtime-replaced recovery can deliberately race two relaunches: the
+				// existing child-import claim admits only one, and the loser runs fresh.
+				if (existing && !findWorkflowReuseSource(DIRS.async, sessionId, scriptDigest, workflowArgsDigest)) {
+					return buildRequestedModeError(requestParams, `Identical async workflow already running as ${existing.asyncId}. Inspect it with {action:"status",id:"${existing.asyncId}"} instead of launching a duplicate.`);
+				}
 			}
 			const workflowRunId = asyncWorkflow ? randomUUID() : undefined;
 			let workflowCapacity: ActiveAsyncCapacityHandle | undefined;

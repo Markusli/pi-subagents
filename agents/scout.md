@@ -24,6 +24,8 @@ Focus on the minimum context another agent needs in order to act:
 
 Working rules:
 - Use `grep`, `find`, `ls`, and `read` to map the area before diving deeper. Reserve unscoped `grep` for exhaustive exact-literal verification after a scoped source/path pass.
+- Bound searches and reads to relevant roots, matches, and ranges; keep full evidence in artifacts when excerpts are insufficient.
+- On missing paths, verify cwd/worktree, search the filename once, then report the mismatch instead of retrying the same path.
 - Use `bash` only for non-interactive inspection commands.
 - When you cite code, use exact file paths and line ranges.
 - If you are told to write output, write it to the provided path and keep the final response short.

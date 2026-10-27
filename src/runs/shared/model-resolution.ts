@@ -266,9 +266,13 @@ function resolveRequiredSubagentModelCandidate(
 	model: string,
 	availableModels: AvailableModelInfo[] | undefined,
 	preferredProvider?: string,
+	deferQualifiedModelToChild = false,
 ): string {
 	const resolved = resolveSubagentModelCandidate(model, availableModels, preferredProvider);
 	if (resolved) return resolved;
+	// An explicit child extension can register a provider absent from the parent.
+	// The child must still resolve and reject unknown models before execution.
+	if (deferQualifiedModelToChild && /^[^\s/:]+\/[^\s/][^\s]*$/.test(model)) return model;
 	const suggestion = suggestAlternateProviderModel(model, availableModels);
 	throw new Error(
 		`Unknown subagent model '${model}' in the active Pi model registry.${suggestion ? ` Did you mean '${suggestion}'?` : ""}`,
@@ -276,12 +280,21 @@ function resolveRequiredSubagentModelCandidate(
 }
 
 export interface ResolveSubagentModelOverrideOptions {
+	/** A child-only extension is declared; validate a missing qualified model in the child registry. */
+	deferQualifiedModelToChild?: boolean;
 	/** When set with `enforce: true`, out-of-scope models are rejected. */
 	scope?: ModelScopeCheckRule | ModelScopeCheckRule[];
 	/** Origin of the requested model: explicit caller-supplied (hard error) vs inherited (warn). Defaults to `"inherited"`. */
 	source?: ModelSource;
 	/** Called for warn-severity violations instead of `console.warn`. */
 	onWarn?: (violation: ModelScopeViolation) => void;
+}
+
+export function hasExplicitChildExtensions(agent: {
+	extensions?: readonly string[];
+	subagentOnlyExtensions?: readonly string[];
+}): boolean {
+	return Boolean(agent.extensions?.length || agent.subagentOnlyExtensions?.length);
 }
 
 function defaultScopeWarn(violation: ModelScopeViolation): void {
@@ -352,7 +365,7 @@ export function resolveSubagentModelOverride(
 	} else {
 		const candidate = resolveSubagentModelCandidate(explicit, availableModels, preferredProvider);
 		if (options?.source === "explicit") {
-			resolved = candidate ?? resolveRequiredSubagentModelCandidate(explicit, availableModels, preferredProvider);
+			resolved = candidate ?? resolveRequiredSubagentModelCandidate(explicit, availableModels, preferredProvider, options.deferQualifiedModelToChild);
 			resolvedFromRegistry = true;
 		} else if (candidate) {
 			resolved = candidate;
@@ -397,6 +410,8 @@ export function resolveEffectiveSubagentModel(
 export type ModelOrigin = ModelSource | "configured";
 
 export interface ResolveModelSelectionOptions {
+	/** A child-only extension is declared; validate a missing qualified model in the child registry. */
+	deferQualifiedModelToChild?: boolean;
 	scope?: ModelScopeCheckRule | ModelScopeCheckRule[];
 	onWarn?: (violation: ModelScopeViolation) => void;
 	/** The primary model came from the running parent session, not configuration. */
@@ -440,13 +455,13 @@ export function resolveModelSelection(
 	const requestedModel = origin === "inherited" ? undefined : model;
 	const scopes = configuredScopes(options?.scope);
 	if (origin === "explicit" && model) {
-		const normalized = resolveRequiredSubagentModelCandidate(model.trim(), availableModels, preferredProvider);
+		const normalized = resolveRequiredSubagentModelCandidate(model.trim(), availableModels, preferredProvider, options?.deferQualifiedModelToChild);
 		enforceModelScopes(normalized, scopes, "explicit", options?.onWarn);
 		model = normalized;
 	}
 	const resolved = model && (origin === "inherited" || origin === "explicit" || options?.primaryModelFromParent)
 		? model.trim()
-		: model ? resolveRequiredSubagentModelCandidate(model.trim(), availableModels, preferredProvider) : undefined;
+		: model ? resolveRequiredSubagentModelCandidate(model.trim(), availableModels, preferredProvider, options?.deferQualifiedModelToChild) : undefined;
 	if (resolved && scopes.some((scope) => scope.enforce === true && scope.strict === true)) {
 		enforceModelScopes(resolved, scopes, "inherited", options?.onWarn);
 	}

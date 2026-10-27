@@ -32,7 +32,7 @@ import { handleWatchdogToolAction, WATCHDOG_TOOL_ACTIONS } from "../../watchdog/
 import type { MainWatchdogRuntime } from "../../watchdog/runtime.ts";
 import { applyWatchdogLaunchRules } from "../../watchdog/rules.ts";
 import { childWatchdogProgressForModel } from "../../watchdog/child-status.ts";
-import { normalizeParentModel, resolveEffectiveSubagentModel, resolveModelOrigin, resolveModelSelection, scopedModelIdsFromContext, type ModelOrigin, type ParentModel } from "../shared/model-resolution.ts";
+import { hasExplicitChildExtensions, normalizeParentModel, resolveEffectiveSubagentModel, resolveModelOrigin, resolveModelSelection, scopedModelIdsFromContext, type ModelOrigin, type ParentModel } from "../shared/model-resolution.ts";
 import { projectChainOutputSchemas, resolveEffectiveOutputSchema } from "../shared/child-launch-plan.ts";
 import { formatRetainedChildren, listRetainedChildren } from "../background/retained-children.ts";
 import { resolveModelScopesForAgent, type ModelScopeConfig } from "../shared/model-scope.ts";
@@ -3217,7 +3217,7 @@ function resolveStaticLaunchSummary(input: {
 			input.parentModel,
 			input.availableModels,
 			agentConfig?.modelProvider ?? input.currentProvider,
-			modelScopes.length === 0 ? {} : { scope: modelScopes },
+			{ ...(modelScopes.length === 0 ? {} : { scope: modelScopes }), deferQualifiedModelToChild: agentConfig ? hasExplicitChildExtensions(agentConfig) : false },
 		);
 	const thinkingOverride = externalRunner ? undefined : input.thinkingOverrideForTask();
 	const thinking = externalRunner ? undefined : resolveEffectiveThinking(model, thinkingOverride ?? agentConfig?.thinking);
@@ -3603,6 +3603,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			? params.model ?? (externalRunnerWithoutExplicitModel ? undefined : a.model)
 			: resolveEffectiveSubagentModel(params.model as string | undefined, a.model, parentModel, availableModels, a.modelProvider ?? currentProvider, {
 				...(modelScopes.length === 0 ? {} : { scope: modelScopes }),
+				deferQualifiedModelToChild: hasExplicitChildExtensions(a),
 				source: modelOrigin === "explicit" ? "explicit" : "inherited",
 			});
 		const modelOverrideFromParent = modelOrigin === "inherited";
@@ -4131,6 +4132,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		agentConfig.modelProvider ?? currentProvider,
 		{
 			...(modelScopes.length === 0 ? {} : { scope: modelScopes }),
+			deferQualifiedModelToChild: hasExplicitChildExtensions(agentConfig),
 			source: modelOrigin === "explicit" ? "explicit" : "inherited",
 		},
 	);

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { discoverAgentSnapshot, findBlockingAgentDiagnostic, formatUnknownAgentError, resolveAgentName, unknownAgentDiagnosticContext, type AgentConfig, type AgentDiscoveryAllResult, type AgentScope, type AgentSource } from "../agents/agents.ts";
 import { resolveExecutionAgentScope } from "../agents/agent-scope.ts";
 import { normalizeSkillInput, resolveSkillsWithFallback } from "../agents/skills.ts";
-import { inheritsParentModel, resolveEffectiveSubagentModel, resolveModelOrigin, resolveModelSelection, type AvailableModelInfo, type ParentModel } from "../runs/shared/model-resolution.ts";
+import { hasExplicitChildExtensions, inheritsParentModel, resolveEffectiveSubagentModel, resolveModelOrigin, resolveModelSelection, type AvailableModelInfo, type ParentModel } from "../runs/shared/model-resolution.ts";
 import { resolveModelScopesForAgent } from "../runs/shared/model-scope.ts";
 import { assertClaudeCodeModelScope, isClaudeCodeAdapterId, resolveClaudeCodeOverride } from "../runs/shared/claude-code-adapter.ts";
 import { applyThinkingSuffix, resolvePiLaunchToolPlan, type PiLaunchToolPlan } from "../runs/shared/child-tool-plan.ts";
@@ -397,6 +397,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		? undefined
 		: resolveEffectiveSubagentModel(input.model, agent.model, input.parentModel, availableModels, preferredProvider, {
 			scope: modelScopes,
+			deferQualifiedModelToChild: hasExplicitChildExtensions(agent),
 			source: modelOrigin === "explicit" ? "explicit" : "inherited",
 		});
 	const effectiveThinkingConfig = input.thinking !== undefined ? input.thinking : agent.thinking;
@@ -405,8 +406,9 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		input.thinkingCeiling,
 		input.inheritedThinkingCeiling,
 	);
-	const model = externalRunner ? undefined : applyThinkingSuffix(resolveModelSelection(primaryModel, availableModels, preferredProvider, {
+		const model = externalRunner ? undefined : applyThinkingSuffix(resolveModelSelection(primaryModel, availableModels, preferredProvider, {
 			scope: modelScopes,
+			deferQualifiedModelToChild: hasExplicitChildExtensions(agent),
 			primaryModelFromParent: modelOrigin === "inherited" || inheritsParentModel(input.model, agent.model, input.parentModel),
 			origin: modelOrigin,
 		}).model, effectiveThinkingConfig, input.thinking !== undefined);

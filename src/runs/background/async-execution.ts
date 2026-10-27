@@ -30,7 +30,7 @@ import { resolveNodeExecutable } from "../../shared/node-executable.ts";
 import { backgroundProcessOptions } from "../shared/background-process-options.ts";
 import { normalizeSkillInput, resolveSkillsWithFallback } from "../../agents/skills.ts";
 import { PI_CODING_AGENT_PACKAGE_ROOT_ENV, PROMPT_REDACTED, resolveChildCwd } from "../../shared/utils.ts";
-import { resolveEffectiveSubagentModel, resolveModelOrigin, resolveModelSelection, resolveSubagentModelOverride, type AvailableModelInfo, type ModelOrigin, type ParentModel } from "../shared/model-resolution.ts";
+import { hasExplicitChildExtensions, resolveEffectiveSubagentModel, resolveModelOrigin, resolveModelSelection, resolveSubagentModelOverride, type AvailableModelInfo, type ModelOrigin, type ParentModel } from "../shared/model-resolution.ts";
 import { resolveToolTimeoutMs, toolTimeoutFromEnv } from "../shared/tool-timeout.ts";
 import { resolveModelScopesForAgent, type ModelScopeConfig } from "../shared/model-scope.ts";
 import { findModelInfo, resolveEffectiveThinking } from "../../shared/model-info.ts";
@@ -1091,7 +1091,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			ctx.currentModel,
 			availableModels,
 			a.modelProvider ?? ctx.currentModelProvider,
-			{ scope: modelScopes, source: modelOrigin === "explicit" ? "explicit" : "inherited" },
+			{ scope: modelScopes, source: modelOrigin === "explicit" ? "explicit" : "inherited", deferQualifiedModelToChild: hasExplicitChildExtensions(a) },
 		);
 		const thinkingOverride = flatIndex === undefined ? undefined : thinkingOverridesByFlatIndex?.[flatIndex];
 		let claudeCodeOverride: ClaudeCodeOverride | undefined;
@@ -1134,6 +1134,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			try {
 				const modelEvidence = resolveModelSelection(primaryModel, availableModels, a.modelProvider ?? ctx.currentModelProvider, {
 					scope: modelScopes,
+					deferQualifiedModelToChild: hasExplicitChildExtensions(a),
 					primaryModelFromParent,
 					origin: modelOrigin,
 				});
@@ -1906,7 +1907,7 @@ export function executeAsyncSingle(
 				ctx.currentModel,
 				availableModels,
 				ctx.currentModelProvider,
-				{ scope: modelScopes, source: modelOrigin === "explicit" ? "explicit" : "inherited" },
+				{ scope: modelScopes, source: modelOrigin === "explicit" ? "explicit" : "inherited", deferQualifiedModelToChild: hasExplicitChildExtensions(agentConfig) },
 			);
 	} catch (error) {
 		return formatAsyncStartError("single", error instanceof Error ? error.message : String(error));
@@ -1970,6 +1971,7 @@ export function executeAsyncSingle(
 		try {
 			const modelEvidence = resolveModelSelection(primaryModel, availableModels, agentConfig.modelProvider ?? ctx.currentModelProvider, {
 				scope: modelScopes,
+				deferQualifiedModelToChild: hasExplicitChildExtensions(agentConfig),
 				primaryModelFromParent: modelOrigin === "inherited",
 				origin: modelOrigin,
 			});

@@ -409,6 +409,28 @@ Project prompt.
 		);
 	});
 
+	it("admits a qualified child-only provider model absent from the parent registry", async () => {
+		const cwd = path.join(tempDir, "repo-child-provider");
+		fs.mkdirSync(cwd, { recursive: true });
+		const extensionPath = path.join(tempDir, "child-provider.mjs");
+		fs.writeFileSync(extensionPath, "export default () => {};\n");
+		writeAgent(path.join(cwd, ".pi", "agents", "haiku.md"), `---
+name: haiku
+description: Child-only model
+model: claude-bridge/claude-haiku-5-5
+subagentOnlyExtensions: ${extensionPath}
+---
+Test child.
+`);
+		const result = await resolveSubagentLaunchContract({
+			agent: "haiku",
+			cwd,
+			availableModels: [{ provider: "openai", id: "gpt-5-mini", fullId: "openai/gpt-5-mini" }],
+		});
+		assert.equal(result.ok, true);
+		if (result.ok) assert.equal(result.contract.model, "claude-bridge/claude-haiku-5-5");
+	});
+
 	it("trusts an inherited parent model outside the host registry", async () => {
 		const cwd = path.join(tempDir, "repo-parent-model");
 		fs.mkdirSync(cwd, { recursive: true });

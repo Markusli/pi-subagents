@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
 	formatSubagentModelVerificationError,
 	fuzzyResolveModel,
+	hasExplicitChildExtensions,
 	isContextOverflow,
 	normalizeModelSegment,
 	normalizeParentModel,
@@ -58,6 +59,31 @@ describe("single model resolution", () => {
 		);
 		assert.throws(() => resolveModelSelection("missing", models), /Unknown subagent model 'missing'/);
 		assert.equal(resolveEffectiveSubagentModel("missing", "gpt-5-mini", undefined, models, undefined, { source: "inherited" }), "missing");
+	});
+
+	it("defers a qualified model for an explicitly extension-backed child, not an unknown bare model", () => {
+		const requested = "claude-bridge/claude-haiku-5-5";
+		const child = { subagentOnlyExtensions: ["/agent/pi-claude-bridge/index.ts"] };
+		assert.equal(hasExplicitChildExtensions(child), true);
+		assert.equal(hasExplicitChildExtensions({ extensions: [] }), false);
+		assert.throws(() => resolveModelSelection(requested, models), /Unknown subagent model/);
+		assert.equal(resolveEffectiveSubagentModel(requested, undefined, undefined, models, undefined, {
+			source: "explicit",
+			deferQualifiedModelToChild: hasExplicitChildExtensions(child),
+		}), requested);
+		assert.deepEqual(resolveModelSelection(requested, models, undefined, {
+			origin: "configured",
+			deferQualifiedModelToChild: true,
+		}), { model: requested, requestedModel: requested });
+		assert.throws(() => resolveModelSelection("missing", models, undefined, {
+			deferQualifiedModelToChild: true,
+		}), /Unknown subagent model 'missing'/);
+		const scope = resolveModelScopesForAgent({ allow: ["openai/*"], enforce: true }, "worker", undefined);
+		assert.throws(() => resolveModelSelection(requested, models, undefined, {
+			origin: "explicit",
+			deferQualifiedModelToChild: true,
+			scope,
+		}), /outside the configured subagent model scope/);
 	});
 
 	it("normalizes registry spelling without switching a qualified provider", () => {

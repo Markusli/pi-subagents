@@ -2730,6 +2730,21 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		assert.equal(mockPi.callCount(), 0);
 	});
 
+	it("hands a child-only provider model to the child without requiring parent registry admission", async () => {
+		mockPi.onCall({ output: "OK" });
+		const model = "claude-bridge/claude-haiku-5-5";
+		const agents = [makeAgent("echo", {
+			model,
+			subagentOnlyExtensions: ["/extensions/pi-claude-bridge/index.ts"],
+		})];
+		const result = await runSync(tempDir, agents, "echo", "Reply OK", {
+			availableModels: [{ provider: "openai", id: "gpt-5-mini", fullId: "openai/gpt-5-mini" }],
+		});
+		assert.equal(result.exitCode, 0);
+		assert.equal(result.model, model);
+		assert.equal(readCallArgs()[readCallArgs().indexOf("--model") + 1], model);
+	});
+
 	it("prefers the parent session provider for ambiguous bare model ids", async () => {
 		mockPi.onCall({ output: "Done" });
 		const agents = [makeAgent("echo", { model: "gpt-5-mini" })];
